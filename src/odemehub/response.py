@@ -291,7 +291,7 @@ class Product:
     currency: str
     #: The tax included in the price, as a percentage.
     tax_rate: str
-    #: monthly or yearly for a recurring product; None for a simple one.
+    #: monthly or annually for a recurring product; None for a simple one.
     period: str | None
     #: Whether it is on sale.
     is_active: bool
@@ -455,7 +455,7 @@ class Subscription:
     items: list[SubscriptionItem]
     #: Where it stands: pending, active, past_due or cancelled.
     status: str
-    #: How often a period comes round: monthly or yearly.
+    #: How often a period comes round: monthly or annually.
     period: str
     #: What the period it is on costs, with the kurus behind a point.
     amount: str

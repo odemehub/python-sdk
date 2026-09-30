@@ -147,7 +147,7 @@ client.save_product(SaveProduct(
     type="recurring",
     amount="149.90",
     tax_rate="20",
-    period="monthly",       # monthly | yearly — yalnız recurring için zorunlu
+    period="monthly",       # monthly | annually — yalnız recurring için zorunlu
 ))
 ```
 

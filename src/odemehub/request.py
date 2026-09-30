@@ -512,7 +512,7 @@ class SaveProduct(ChannelMessage):
     #: The tax included in the price, as a percentage, e.g. '20'.
     tax_rate: str
     #: How often a recurring product comes round. Only a recurring product has one.
-    period: Literal["monthly", "yearly"] | None = None
+    period: Literal["monthly", "annually"] | None = None
     #: Three letters, e.g. TRY. Left out, the gateway takes the lira.
     currency: str | None = None
     #: Whether it is on sale. Left out, it is.
