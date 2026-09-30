@@ -284,6 +284,8 @@ class Product:
     #: The key the product is known by in the calling system.
     channel_reference: str
     name: str
+    #: The address of the picture the checkout shows it with, if it has one.
+    image: str | None
     #: simple or recurring.
     type: str
     #: The price of one, as digits with the kurus behind a point.
@@ -305,6 +307,7 @@ class Product:
             channel_token=_string(product.get("channel_token")),
             channel_reference=_string(product.get("channel_reference")),
             name=_string(product.get("name")),
+            image=_optional_string(product.get("image")),
             type=_string(product.get("type")),
             amount=_string(product.get("amount")),
             currency=_string(product.get("currency")),
@@ -420,6 +423,8 @@ class SubscriptionItem:
     #: The merchant's own key for the product.
     channel_reference: str
     name: str
+    #: The picture shown for the line: the one named when the subscription was opened, or else the product's.
+    image: str | None
     quantity: int
     #: The price of one, as digits with the kurus behind a point.
     unit_amount: str
@@ -431,6 +436,7 @@ class SubscriptionItem:
         return cls(
             channel_reference=_string(item.get("channel_reference")),
             name=_string(item.get("name")),
+            image=_optional_string(item.get("image")),
             quantity=_integer(item.get("quantity")),
             unit_amount=_string(item.get("unit_amount")),
             tax_rate=_optional_string(item.get("tax_rate")),

@@ -271,6 +271,8 @@ class OrderItem:
     channel_reference: str
     #: Left out, the product's own name is shown.
     name: str | None = None
+    #: The https address of the picture shown beside the line at checkout. Left out, the product's own picture is shown.
+    image: str | None = None
     #: Left out, the line is for one.
     quantity: int | None = None
     #: The price of one, as digits with the kurus behind a point. Left out, the product's own price is charged.
@@ -282,6 +284,7 @@ class OrderItem:
         return _said({
             "channel_reference": self.channel_reference,
             "name": self.name,
+            "image": self.image,
             "quantity": self.quantity,
             "unit_amount": self.unit_amount,
             "tax_rate": self.tax_rate,
@@ -349,12 +352,15 @@ class SubscriptionItem:
     #: the product's own price. Left out, the first period is charged at that
     #: price too.
     unit_amount: str | None = None
+    #: The https address of the picture shown at checkout for this line. Left out, the product's own picture is shown.
+    image: str | None = None
 
     def to_body(self) -> Body:
         return _said({
             "channel_reference": self.channel_reference,
             "quantity": self.quantity,
             "unit_amount": self.unit_amount,
+            "image": self.image,
         })
 
 
@@ -517,6 +523,9 @@ class SaveProduct(ChannelMessage):
     currency: str | None = None
     #: Whether it is on sale. Left out, it is.
     is_active: bool | None = None
+    #: The https address of the picture the checkout shows it with. Left out,
+    #: the product keeps the picture it has; an empty string takes it off.
+    image: str | None = None
 
     def to_body(self, channel_token: str) -> Body:
         return {
@@ -524,6 +533,7 @@ class SaveProduct(ChannelMessage):
                 "channel_token": self._channel(channel_token),
                 "channel_reference": self.channel_reference,
                 "name": self.name,
+                "image": self.image,
                 "type": self.type,
                 "amount": self.amount,
                 "currency": self.currency,

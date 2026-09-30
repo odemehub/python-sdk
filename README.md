@@ -139,6 +139,7 @@ product = client.save_product(SaveProduct(
     type="simple",          # simple | recurring
     amount="450.00",
     tax_rate="20",          # fiyatın içindeki KDV oranı
+    image="https://magazam.com/img/kahve-makinesi.jpg",  # ödeme sayfasında gösterilir
 ))
 
 client.save_product(SaveProduct(
@@ -151,7 +152,7 @@ client.save_product(SaveProduct(
 ))
 ```
 
-Aynı kanalda aynı referans aynı üründür: tekrar gönderirseniz ikinci ürün açılmaz, mevcut olan güncellenir. `currency` verilmezse TRY, `is_active` verilmezse `True` kabul edilir. Ürün silinmez; `is_active=False` ile satışa kapatılır.
+Aynı kanalda aynı referans aynı üründür: tekrar gönderirseniz ikinci ürün açılmaz, mevcut olan güncellenir. `currency` verilmezse TRY, `is_active` verilmezse `True` kabul edilir. Ürün silinmez; `is_active=False` ile satışa kapatılır. `image` yalnızca `https://` adres alır; göndermezseniz ürün mevcut görselini (panelden yüklenmiş olanı da) korur, boş metin gönderirseniz görsel kaldırılır.
 
 Ödeme istekleri ürünü hiçbir zaman değiştirmez; ürünün tek yazıldığı yer bu çağrı ve panel.
 
@@ -170,20 +171,20 @@ order = client.order_payment(OrderPayment(
     items=[
         OrderItem(channel_reference="KAHVE-MAKINESI"),
         OrderItem(channel_reference="KAHVE-500G", quantity=2, unit_amount="180.00"),
-        OrderItem(channel_reference="HEDIYE-PAKETI", name="Hediye paketi", unit_amount="25.00"),
+        OrderItem(channel_reference="HEDIYE-PAKETI", name="Hediye paketi", unit_amount="25.00", image="https://magazam.com/img/hediye-paketi.jpg"),
     ],
 ))
 
 return redirect(order.checkout_url)
 ```
 
-Sipariş tutarını göndermezsiniz; geçit kalemleri toplar ve `order.amount` olarak döner. Bir kalemin boş bıraktığı ad, fiyat ve KDV oranı kayıtlı üründen gelir; kalemde verdiğiniz değerler yalnızca o sipariş için geçerlidir, ürünü değiştirmez. Kayıtlı olmayan bir referansla da kalem gönderebilirsiniz, ama o zaman `name` ve `unit_amount` zorunludur.
+Sipariş tutarını göndermezsiniz; geçit kalemleri toplar ve `order.amount` olarak döner. Bir kalemin boş bıraktığı ad, fiyat ve KDV oranı kayıtlı üründen gelir; kalemde verdiğiniz değerler yalnızca o sipariş için geçerlidir, ürünü değiştirmez. Kayıtlı olmayan bir referansla da kalem gönderebilirsiniz, ama o zaman `name` ve `unit_amount` zorunludur. Kalemin `image` alanı (`https://` adres) ödeme sayfasında kalemin yanında gösterilir; verilmezse kayıtlı ürünün görseli kullanılır, ürün kayıtlı değilse kalem görselsiz görünür.
 
 Ödeme tamamlanınca müşteri, 3D'dekiyle aynı biçimde `success_url` adresinize döner: aynı üç alan gelir, sonucu yine `retrieve_payment()` ile sorarsınız. Müşteri ödeme sayfasında karttan kaynaklı bir hata alırsa size dönmez, sayfada kalıp başka kartla dener.
 
 ## Abonelikler
 
-Müşteriden dönem dönem tahsilat yapmak için abonelik açarsınız. Neye abone olunduğu bir ya da birkaç **abonelik ürünüdür** (`type="recurring"`), sizdeki referanslarıyla adlandırılır; fiyatı, para birimini ve dönemini ürün taşır. Aynı aboneliğe konan ürünlerin dönemi ve para birimi aynı olmalıdır.
+Müşteriden dönem dönem tahsilat yapmak için abonelik açarsınız. Neye abone olunduğu bir ya da birkaç **abonelik ürünüdür** (`type="recurring"`), sizdeki referanslarıyla adlandırılır; fiyatı, para birimini ve dönemini ürün taşır. Aynı aboneliğe konan ürünlerin dönemi ve para birimi aynı olmalıdır. Bir kaleme `image` (`https://` adres) verirseniz ödeme sayfasında ürünün görseli yerine o gösterilir.
 
 ```python
 from odemehub.request import SubscriptionItem, SubscriptionPayment
