@@ -237,10 +237,19 @@ class SecurePayment(Payment):
 
     #: Where the customer is posted back to, with the signed outcome, once they are done at their bank.
     callback_url: str
+    #: Where the merchant's own server is told how the payment went, signed
+    #: the way every answer is. The customer's browser carries the word to
+    #: ``callback_url`` only if the customer stays for it; this address hears
+    #: either way, including when the customer never opened the bank's page
+    #: and the payment expired.
+    webhook_url: str | None = None
 
     def to_body(self, channel_token: str) -> Body:
         body = super().to_body(channel_token)
         body["transaction"]["callback_url"] = self.callback_url
+
+        if self.webhook_url is not None:
+            body["transaction"]["webhook_url"] = self.webhook_url
 
         return body
 
@@ -311,6 +320,11 @@ class OrderPayment(ChannelMessage):
     items: list[OrderItem]
     #: Where the customer goes if they turn back without paying.
     cancel_url: str | None = None
+    #: Where the merchant's own server is told the order was paid, signed the
+    #: way every answer is. The customer's browser carries the word to
+    #: ``success_url`` only if the customer stays for it; this address hears
+    #: either way.
+    webhook_url: str | None = None
     description: str | None = None
     #: Three letters, e.g. TRY. Left out, the gateway takes the lira.
     currency: str | None = None
@@ -329,9 +343,51 @@ class OrderPayment(ChannelMessage):
                 "currency": self.currency,
                 "success_url": self.success_url,
                 "cancel_url": self.cancel_url,
+                "webhook_url": self.webhook_url,
                 "items": [item.to_body() for item in self.items],
             }),
             "customer": self.customer.to_body(),
+        }
+
+
+@dataclass(frozen=True, kw_only=True)
+class RetrieveOrder(Message):
+    """
+    Where an order stands: what it is for, whether it has been paid and, if
+    so, by which payment. The order is named by the token the gateway gave it
+    when it was opened, which is all a merchant holds of an order whose
+    customer never came back from the checkout. Nothing is changed by asking.
+    """
+
+    path: ClassVar[str] = "retrieve-order"
+
+    #: The order's token in the gateway, as it answered when it was opened.
+    order_token: str
+
+    def to_body(self, channel_token: str) -> Body:
+        return {"order": {"token": self.order_token}}
+
+
+@dataclass(frozen=True, kw_only=True)
+class RetrieveTransactions(ChannelMessage):
+    """
+    Every attempt at paying something the merchant names by its own number
+    on a channel: the order number it opened an order with, or started a
+    payment with. How many times the customer tried, which were refused and
+    which went through. Nothing is changed by asking.
+    """
+
+    path: ClassVar[str] = "retrieve-transactions"
+
+    #: The number the payments were made under in the calling system.
+    channel_reference: str
+
+    def to_body(self, channel_token: str) -> Body:
+        return {
+            "transaction": {
+                "channel_token": self._channel(channel_token),
+                "channel_reference": self.channel_reference,
+            },
         }
 
 

@@ -89,6 +89,7 @@ payment = client.secure_payment(SecurePayment(
     installment_number=1,
     ip=request.remote_addr,
     callback_url="https://magazam.com/odeme/donus",
+    webhook_url="https://magazam.com/odemehub/odeme",   # isteğe bağlı, aşağıya bakın
     customer=customer,
     card=card,
 ))
@@ -125,6 +126,45 @@ def odeme_donus():
 ```
 
 Neden böyle: o POST'u bizim sunucumuz değil, müşterinin tarayıcısı gönderir; tarayıcıya imzalayacak bir sır verilemez. `successful` alanına bakıp sipariş kapatmayın — onu herkes gönderebilir; yalnız "başarısız" ipucunda gereksiz sorgudan kaçınmak için kullanın. Geçide sorduğunuz yanıt ise her zaman imzalıdır ve SDK imzayı sizin için doğrular. Başkasının işlemini sorarsanız `ValidationError` alırsınız.
+
+### Ödeme bildirimi (webhook)
+
+Müşteri bankadan sonra sekmeyi kapatırsa tarayıcı `callback_url` adresinize hiç dönmez. Bunun için ödemeyi başlatırken `webhook_url` verin: ödeme bankada bitince (ya da müşteri bankanın sayfasını hiç açmayıp süresi dolunca) geçidin **kendi sunucusu** o adrese imzalı bir POST gönderir. Gövde `retrieve_payment()` yanıtının aynısıdır, üstüne hangi duruma gelindiğini söyleyen `event` eklenir: `successful`, `failed` ya da `expired`. Gövdeyi abonelik bildirimindeki gibi **ham** okuyun.
+
+```python
+from odemehub import SignatureError
+
+@app.post("/odemehub/odeme")
+def odeme_bildirimi():
+    try:
+        webhook = client.transaction_webhook(request.get_data(), request.headers.get("X-Signature"))
+    except SignatureError:
+        return "", 400
+
+    if webhook.is_successful():
+        siparisi_odendi_isaretle(webhook.channel_reference, webhook.transaction_token)
+
+    return "", 200
+```
+
+Ödeme başlatılırken reddedilen (yanıtı anında aldığınız) ödeme için bildirim gitmez. Aynı sipariş için birden fazla deneme olabildiğinden bildirimi `transaction_token` ile tekilleştirin. 2xx dışında bir yanıt (ya da yanıtsızlık) başarısız sayılır; bildirim 5 dakika sonra bir kez daha denenir ve ulaşmayan bildirimler panelde işlemin sayfasında listelenir. Bildirim hiç gelmezse `retrieve_transactions()` ile sorabilirsiniz (aşağıda).
+
+### Bir referansın bütün denemeleri
+
+Elinizde yalnızca kendi sipariş numaranız varsa, o numara altında yapılmış **bütün** ödeme denemelerini — hangisi reddedildi, hangisi geçti — eskiden yeniye listeleyin:
+
+```python
+from odemehub.request import RetrieveTransactions
+
+attempts = client.retrieve_transactions(RetrieveTransactions(channel_reference="SIP-10232"))
+
+for attempt in attempts.transactions:
+    print(attempt.status, attempt.payment_status, attempt.error_message or "")
+
+paid = attempts.successful()   # geçen deneme ya da None
+```
+
+Her deneme `token`, `status` (`started`, `redirected_to_secure_page`, `returned_from_secure_page`, `failed`, `expired`, `successful`), `payment_status` (`unpaid`, `paid`, `cancelled`, `refunded`, `partially_refunded`), `security_type`, `amount` / `base_amount` / `currency`, `installment_number`, `is_test`, `error_code` / `error_message`, `created_at`, `customer_channel_reference`, `conversion` ve bağlı olduğu `order_token` / `subscription_token` alanlarını taşır. Ödeme sayfasından açılan siparişin denemeleri de siparişin referansı altında burada görünür.
 
 ## Ürünler
 
@@ -167,6 +207,7 @@ order = client.order_payment(OrderPayment(
     channel_reference="SIPARIS-10233",
     success_url="https://magazam.com/tesekkurler",
     cancel_url="https://magazam.com/sepet",
+    webhook_url="https://magazam.com/odemehub/siparis",   # isteğe bağlı, aşağıya bakın
     customer=customer,
     items=[
         OrderItem(channel_reference="KAHVE-MAKINESI"),
@@ -181,6 +222,39 @@ return redirect(order.checkout_url)
 Sipariş tutarını göndermezsiniz; geçit kalemleri toplar ve `order.amount` olarak döner. Bir kalemin boş bıraktığı ad, fiyat ve KDV oranı kayıtlı üründen gelir; kalemde verdiğiniz değerler yalnızca o sipariş için geçerlidir, ürünü değiştirmez. Kayıtlı olmayan bir referansla da kalem gönderebilirsiniz, ama o zaman `name` ve `unit_amount` zorunludur. Kalemin `image` alanı (`https://` adres) ödeme sayfasında kalemin yanında gösterilir; verilmezse kayıtlı ürünün görseli kullanılır, ürün kayıtlı değilse kalem görselsiz görünür.
 
 Ödeme tamamlanınca müşteri, 3D'dekiyle aynı biçimde `success_url` adresinize döner: aynı üç alan gelir, sonucu yine `retrieve_payment()` ile sorarsınız. Müşteri ödeme sayfasında karttan kaynaklı bir hata alırsa size dönmez, sayfada kalıp başka kartla dener.
+
+Yanıt (`response.Order`) siparişi bütünüyle taşır: `token`, `channel_reference`, `description`, `status` (`open` / `paid`), `items`, `subtotal`, `tax_amount`, `amount`, `currency`, `is_test`, `created_at`, `checkout_url` (ödenince `None`) ve ödeyen işlemin token'ı `transaction_token` (açıkken `None`). Aynı nesne `retrieve_order()` ve sipariş bildiriminde de gelir.
+
+### Sipariş bildirimi (webhook) ve sipariş sorgusu
+
+Müşteri ödedikten sonra sekmeyi kapatırsa tarayıcı `success_url` adresinize hiç dönmez. Siparişi açarken `webhook_url` verirseniz sipariş ödendiği an geçidin **kendi sunucusu** o adrese imzalı bir POST gönderir; gövde `event: "paid"` ve siparişin kendisidir (`transaction_token` dolu gelir). Başarısız denemeler bildirilmez — sipariş açık kalır, müşteri sayfada yeniden dener.
+
+```python
+@app.post("/odemehub/siparis")
+def siparis_bildirimi():
+    try:
+        webhook = client.order_webhook(request.get_data(), request.headers.get("X-Signature"))
+    except SignatureError:
+        return "", 400
+
+    if webhook.is_paid():
+        siparisi_odendi_isaretle(webhook.order.channel_reference, webhook.order.transaction_token)
+
+    return "", 200
+```
+
+Elinizde siparişin token'ı varsa durumunu her zaman kendiniz de sorabilirsiniz:
+
+```python
+from odemehub.request import RetrieveOrder
+
+order = client.retrieve_order(RetrieveOrder(order_token=token))
+
+if order.is_paid():
+    ...   # order.transaction_token ile iade / iptal / retrieve_payment yapılabilir
+```
+
+Siparişin bütün denemelerini (reddedilenler dahil) görmek için `retrieve_transactions()` ile siparişin `channel_reference` değerini sorun.
 
 ## Abonelikler
 
@@ -299,7 +373,7 @@ Gönderilen olaylar aboneliğin **durumudur**, yapılan işlem değil:
 | `cancelled` | abonelik iptal edildi; müşteri `ends_at` tarihine kadar hizmeti almaya devam eder |
 | `ended` | ödenmiş dönem doldu, abonelik kapandı |
 
-2xx dışında bir yanıt (ya da yanıtsızlık) başarısız sayılır; bildirim 5 dakika sonra bir kez daha denenir. Ulaşmayan bildirimler panelde aboneliğin sayfasında HTTP kodu ve yanıtıyla listelenir.
+2xx dışında bir yanıt (ya da yanıtsızlık) başarısız sayılır; bildirim 5 dakika sonra bir kez daha denenir. Ulaşmayan bildirimler panelde aboneliğin sayfasında HTTP kodu ve yanıtıyla listelenir. Sipariş (`order_webhook()`) ve 3D ödeme (`transaction_webhook()`) bildirimleri de aynı yöntemle gider; her biri kendi adresine, kendi okuyucusuyla.
 
 ## Ödeme hangi hesaptan geçer
 

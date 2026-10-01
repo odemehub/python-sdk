@@ -237,40 +237,246 @@ class GiveBack(Payment):
 
 
 @dataclass(frozen=True, kw_only=True)
-class OrderPayment:
-    """An order opened to be paid on the gateway's own page."""
+class TransactionWebhook(Payment):
+    """
+    Word the gateway sent about a payment the merchant started and the
+    customer finished — or did not — at their bank. It is the same answer
+    ``retrieve_payment()`` gives, with the state reached on top: the customer
+    may have closed the page before their browser could bring the outcome
+    back, and then this is the only word the merchant hears.
+    """
+
+    #: The state reached: successful, failed or expired.
+    event: str
+
+    def is_successful(self) -> bool:
+        """Whether the payment went through."""
+        return self.event == "successful"
+
+    def is_failed(self) -> bool:
+        """Whether the bank turned the payment away."""
+        return self.event == "failed"
+
+    def is_expired(self) -> bool:
+        """Whether the customer never opened the bank's page in time, so the payment was closed without being tried."""
+        return self.event == "expired"
+
+    @classmethod
+    def from_body(cls, body: Body) -> TransactionWebhook:
+        return cls(event=_string(body.get("event")), **cls._parts(body))
+
+
+@dataclass(frozen=True, kw_only=True)
+class OrderItem:
+    """One line of what an order is made up of, as it was written down when the order was opened."""
+
+    #: The merchant's own key for what is on the line.
+    channel_reference: str
+    name: str
+    #: The picture the line is shown with, if any.
+    image: str | None
+    quantity: int
+    #: The price of one, as digits with the kurus behind a point.
+    unit_amount: str
+    #: The tax included in the price, as a percentage; None for a line with no rate.
+    tax_rate: str | None
+    #: The tax the line comes to; None for a line with no rate.
+    tax_amount: str | None
+
+    @classmethod
+    def from_body(cls, item: Body) -> OrderItem:
+        return cls(
+            channel_reference=_string(item.get("channel_reference")),
+            name=_string(item.get("name")),
+            image=_optional_string(item.get("image")),
+            quantity=_integer(item.get("quantity")),
+            unit_amount=_string(item.get("unit_amount")),
+            tax_rate=_optional_string(item.get("tax_rate")),
+            tax_amount=_optional_string(item.get("tax_amount")),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class Order:
+    """
+    An order as the gateway keeps it: what is being paid for, what it comes
+    to, where it stands and — once it is paid — the payment that paid it. The
+    same answer comes back whether the order has just been opened, asked
+    after, or the gateway is telling the merchant it was paid.
+    """
 
     result: Result
-    #: The order's token in the gateway.
+    #: The order's token in the gateway; name it to ask after it later.
     token: str
     #: The channel the order was opened on.
     channel_token: str
     #: The number the order is known by in the calling system.
     channel_reference: str
+    description: str | None
+    #: Where the order stands: open until it is paid, then paid.
+    status: str
+    #: What the order is made up of.
+    items: list[OrderItem]
+    #: What the lines come to before tax; None when no line carried a rate.
+    subtotal: str | None
+    #: The tax the order carries; None when no line carried a rate.
+    tax_amount: str | None
     #: What the order comes to, added up from its lines by the gateway.
     amount: str
     currency: str
-    #: Where the order stands: open until it is paid.
-    status: str
-    #: Where the customer has to be sent to pay.
-    checkout_url: str
-    #: The merchant's own key for the customer the order is for.
-    customer_channel_reference: str
+    #: Whether it was paid in the test environment; None until it is paid.
+    is_test: bool | None
+    created_at: str | None
+    #: Where the customer pays, while the order is still open; None once it is paid.
+    checkout_url: str | None
+    #: The token of the payment that paid the order, which names it again for a refund; None while it is open.
+    transaction_token: str | None
+    #: The merchant's own key for the customer the order is for; None for an order opened without one.
+    customer_channel_reference: str | None
+
+    def is_paid(self) -> bool:
+        """Whether the order has been paid."""
+        return self.status == "paid"
 
     @classmethod
-    def from_body(cls, body: Body) -> OrderPayment:
+    def from_body(cls, body: Body) -> Order:
         order = _object(body.get("order"))
+        transaction = _object(order.get("transaction"))
 
         return cls(
             result=Result.from_body(body),
             token=_string(order.get("token")),
             channel_token=_string(order.get("channel_token")),
             channel_reference=_string(order.get("channel_reference")),
+            description=_said(order.get("description")),
+            status=_string(order.get("status")),
+            items=[OrderItem.from_body(_object(item)) for item in _list(order.get("items"))],
+            subtotal=_said(order.get("subtotal")),
+            tax_amount=_said(order.get("tax_amount")),
             amount=_string(order.get("amount")),
             currency=_string(order.get("currency")),
-            status=_string(order.get("status")),
-            checkout_url=_string(order.get("checkout_url")),
-            customer_channel_reference=_string(_object(body.get("customer")).get("channel_reference")),
+            is_test=_optional_boolean(order.get("is_test")),
+            created_at=_said(order.get("created_at")),
+            checkout_url=_said(order.get("checkout_url")),
+            transaction_token=_said(transaction.get("token")),
+            customer_channel_reference=_said(_object(body.get("customer")).get("channel_reference")),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class OrderWebhook:
+    """
+    Word the gateway sent about one of the merchant's orders: that it was
+    paid, with the payment that paid it. An order is only ever told of once;
+    an attempt that fails leaves it open and the customer trying again.
+    """
+
+    #: The state reached: paid.
+    event: str
+    #: The order as it stands now, with the payment that paid it.
+    order: Order
+
+    def is_paid(self) -> bool:
+        """Whether the order has been paid, which is the one thing said here."""
+        return self.event == "paid"
+
+    @classmethod
+    def from_body(cls, body: Body) -> OrderWebhook:
+        return cls(event=_string(body.get("event")), order=Order.from_body(body))
+
+
+@dataclass(frozen=True, kw_only=True)
+class Transaction:
+    """
+    One attempt at a payment, as the gateway lists it: enough to tell the
+    attempts apart and see where each got to. Where it stands is said twice
+    on purpose — the attempt's own state, and what became of the money, which
+    can move on to refunded long after the attempt is over.
+    """
+
+    #: The payment's token in the gateway, which names it again to ask after or give back.
+    token: str
+    #: The channel the payment came in on.
+    channel_token: str
+    #: The reference the payment was made under in the calling system.
+    channel_reference: str
+    #: The attempt's state: started, redirected_to_secure_page, returned_from_secure_page, failed, expired or successful.
+    status: str
+    #: What became of the money: unpaid, paid, cancelled, refunded or partially_refunded.
+    payment_status: str
+    #: How it was made: secure (confirmed at the bank) or regular.
+    security_type: str
+    #: What the card was charged, with the kurus behind a point.
+    amount: str
+    #: What was being sold, before anything added for instalments.
+    base_amount: str
+    currency: str
+    installment_number: int
+    #: Whether it was made in the test environment.
+    is_test: bool
+    #: What the provider called the refusal, for an attempt that failed.
+    error_code: str | None
+    #: Why it failed, written for a person.
+    error_message: str | None
+    created_at: str | None
+    #: The merchant's own key for the customer; None for a payer the merchant never named.
+    customer_channel_reference: str | None
+    #: What reached the card when it was charged in another money; None when charged as asked.
+    conversion: Conversion | None
+    #: The token of the order this attempt was at, when it was at one.
+    order_token: str | None
+    #: The token of the subscription this attempt paid a period of, when it did.
+    subscription_token: str | None
+
+    def is_successful(self) -> bool:
+        """Whether the attempt went through."""
+        return self.status == "successful"
+
+    @classmethod
+    def from_body(cls, transaction: Body) -> Transaction:
+        conversion = transaction.get("conversion")
+
+        return cls(
+            token=_string(transaction.get("token")),
+            channel_token=_string(transaction.get("channel_token")),
+            channel_reference=_string(transaction.get("channel_reference")),
+            status=_string(transaction.get("status")),
+            payment_status=_string(transaction.get("payment_status")),
+            security_type=_string(transaction.get("security_type")),
+            amount=_string(transaction.get("amount")),
+            base_amount=_string(transaction.get("base_amount")),
+            currency=_string(transaction.get("currency")),
+            installment_number=_integer(transaction.get("installment_number")) or 1,
+            is_test=_boolean(transaction.get("is_test")),
+            error_code=_said(transaction.get("error_code")),
+            error_message=_said(transaction.get("error_message")),
+            created_at=_said(transaction.get("created_at")),
+            customer_channel_reference=_said(_object(transaction.get("customer")).get("channel_reference")),
+            conversion=Conversion.from_body(conversion) if isinstance(conversion, dict) else None,
+            order_token=_said(_object(transaction.get("order")).get("token")),
+            subscription_token=_said(_object(transaction.get("subscription")).get("token")),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class Transactions:
+    """
+    Every attempt made under one of the merchant's own numbers on a channel,
+    oldest first, so they read as the attempts were made.
+    """
+
+    result: Result
+    transactions: list[Transaction]
+
+    def successful(self) -> Transaction | None:
+        """The attempt that went through, if one did."""
+        return next((transaction for transaction in self.transactions if transaction.is_successful()), None)
+
+    @classmethod
+    def from_body(cls, body: Body) -> Transactions:
+        return cls(
+            result=Result.from_body(body),
+            transactions=[Transaction.from_body(_object(transaction)) for transaction in _list(body.get("transactions"))],
         )
 
 

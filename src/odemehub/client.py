@@ -116,9 +116,9 @@ class Client:
         """Charge a payment straight to the card. A successful answer is a settled payment."""
         return response.RegularPayment.from_body(self._send(payment))
 
-    def order_payment(self, order_payment: request.OrderPayment) -> response.OrderPayment:
+    def order_payment(self, order_payment: request.OrderPayment) -> response.Order:
         """Open an order to be paid on the gateway's own page, and get back the address to send the customer to."""
-        return response.OrderPayment.from_body(self._send(order_payment))
+        return response.Order.from_body(self._send(order_payment))
 
     def subscription_payment(self, subscription: request.SubscriptionPayment) -> response.Subscription:
         """
@@ -151,6 +151,14 @@ class Client:
         """
         return response.Payment.from_body(self._send(payment))
 
+    def retrieve_transactions(self, transactions: request.RetrieveTransactions) -> response.Transactions:
+        """
+        Every attempt made under one of the merchant's own numbers on a
+        channel, oldest first: how many times the customer tried, which were
+        refused and which went through.
+        """
+        return response.Transactions.from_body(self._send(transactions))
+
     def retrieve_bin(self, retrieve_bin: request.RetrieveBin) -> response.Bin:
         """
         Ask what the gateway's provider knows about a card by the head of its
@@ -166,6 +174,14 @@ class Client:
         lines and subscriptions name products by key.
         """
         return response.Product.from_body(self._send(product))
+
+    def retrieve_order(self, order: request.RetrieveOrder) -> response.Order:
+        """
+        Where an order stands: what it is for, whether it has been paid and,
+        if so, by which payment. The one call a merchant holding nothing but
+        the order's token can make.
+        """
+        return response.Order.from_body(self._send(order))
 
     def retrieve_subscription(self, subscription: request.RetrieveSubscription) -> response.Subscription:
         """
@@ -208,12 +224,37 @@ class Client:
 
         :raises SignatureError: when the signature does not hold.
         """
+        return response.SubscriptionWebhook.from_body(self._webhook(payload, signature))
+
+    def order_webhook(self, payload: str | bytes, signature: str | None) -> response.OrderWebhook:
+        """
+        Read the word the gateway sent about an order: that it was paid, with
+        the payment that paid it. Posted to the address the order was opened
+        with and read the way a subscription's word is.
+
+        :raises SignatureError: when the signature does not hold.
+        """
+        return response.OrderWebhook.from_body(self._webhook(payload, signature))
+
+    def transaction_webhook(self, payload: str | bytes, signature: str | None) -> response.TransactionWebhook:
+        """
+        Read the word the gateway sent about a payment the customer finished
+        at their bank: the same answer ``retrieve_payment()`` gives, with the
+        state reached on top. Posted to the address the payment was started
+        with and read the way a subscription's word is.
+
+        :raises SignatureError: when the signature does not hold.
+        """
+        return response.TransactionWebhook.from_body(self._webhook(payload, signature))
+
+    def _webhook(self, payload: str | bytes, signature: str | None) -> Body:
+        """Check a word's signature and open it. Nothing in it is believed until the signature holds."""
         if not self._signature.verify(payload, signature):
             raise SignatureError("Bildirimin imzası doğrulanamadı; bildirim ödeme geçidinden gelmemiş olabilir.")
 
         text = payload.decode("utf-8") if isinstance(payload, bytes) else payload
 
-        return response.SubscriptionWebhook.from_body(self._decode(text, 0))
+        return self._decode(text, 0)
 
     def _send(self, message: request.Message) -> Body:
         """
