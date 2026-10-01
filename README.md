@@ -22,7 +22,7 @@ import os
 from odemehub import Client, Options
 
 client = Client(Options(
-    base_url="https://odeme.gurmehub.com",
+    base_url="https://app.odemehub.com",
     team="4829301756",                                   # Çalışma Alanı Kimliğiniz
     channel_token="6f1c2e7a-4b3d-4c8e-9a61-2f5d7b0c3e14", # müşterinin size ulaştığı kanal
     api_key=os.environ["ODEMEHUB_API_KEY"],

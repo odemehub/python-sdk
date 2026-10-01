@@ -32,7 +32,7 @@ class Options:
     opens its own team's endpoints.
     """
 
-    #: The address the application is served from, e.g. https://odeme.gurmehub.com.
+    #: The address the application is served from, e.g. https://app.odemehub.com.
     base_url: str
     #: The team the payments are made on behalf of, as the Entegrasyon page names it.
     team: str
