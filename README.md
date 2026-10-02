@@ -1,8 +1,8 @@
 # ödemehub Python SDK
 
-ödemehub ödeme geçidini kendi uygulamanızdan kullanmak için hazırlanmış Python istemcisi. Kart çekmek, 3D ödeme başlatmak, müşteriyi ödeme sayfasına yollamak, ürün kataloğunuzu eşlemek, abonelik açmak, kart saklamak, iade ve iptal yapmak ve bir kartın taksit seçeneklerini sormak için gereken her şey burada.
+ödemehub ödeme geçidini kendi uygulamanızdan kullanmak için Python istemcisi. Kart çekmek, 3D ödeme başlatmak, sipariş, abonelik ve ödeme linki açmak, kart saklamak, iade ve iptal yapmak, taksit sormak: hepsi burada.
 
-İstemci her isteği takımınızın gizli anahtarıyla imzalar, gelen her yanıtın imzasını doğrular. Siz imza, başlık ya da JSON ayrıntılarıyla uğraşmazsınız. Yalnızca standart kütüphaneyi kullanır; kurulacak başka paket yoktur. Tip ipuçları pakettedir.
+İstemci her isteği gizli anahtarınızla imzalar, gelen her yanıtın imzasını doğrular. Siz imza, başlık ya da JSON ayrıntılarıyla uğraşmazsınız. Her uç nokta için bir metot vardır ve adı uç noktanın adıdır: `create-order` için `create_order()`, `retrieve-saved-cards-by-reference` için `retrieve_saved_cards_by_reference()`. Yalnızca standart kütüphaneyi kullanır; kurulacak başka paket yoktur. Tip ipuçları pakettedir.
 
 ## Kurulum
 
@@ -14,7 +14,7 @@ pip install odemehub
 
 ## Yapılandırma
 
-Dört bilgiye ihtiyacınız var. Hepsi paneldeki **Entegrasyon** sayfasındadır (menünün en altında): API anahtarı, gizli anahtar, Çalışma Alanı Kimliğiniz ve kanallarınızla ödeme hesaplarınızın token'ları.
+Dört bilgi gerekir. Hepsi paneldeki **Entegrasyon** sayfasındadır: Çalışma Alanı Kimliğiniz, API anahtarı, gizli anahtar ve kanalınızın token'ı.
 
 ```python
 import os
@@ -23,62 +23,94 @@ from odemehub import Client, Options
 
 client = Client(Options(
     base_url="https://app.odemehub.com",
-    team="4829301756",                                   # Çalışma Alanı Kimliğiniz
-    channel_token="6f1c2e7a-4b3d-4c8e-9a61-2f5d7b0c3e14", # müşterinin size ulaştığı kanal
+    team="1000000001",                                     # Çalışma Alanı Kimliği
+    channel_token="6f1c2e7a-4b3d-4c8e-9a61-2f5d7b0c3e14",  # müşterinin size ulaştığı kanal
     api_key=os.environ["ODEMEHUB_API_KEY"],
     api_secret=os.environ["ODEMEHUB_API_SECRET"],
 ))
 ```
 
-Gizli anahtar hiçbir zaman tel üzerinden gitmez; yalnızca imza üretmekte kullanılır. Anahtarları kodun içine yazmayın, ortam değişkeninde tutun.
+Gizli anahtar hiçbir zaman tel üzerinden gitmez; yalnızca imza üretmekte ve doğrulamakta kullanılır. Anahtarları kodun içine yazmayın, ortam değişkeninde tutun.
 
-Kanal token'ı entegrasyonun tamamı için bir kez verilir. Birden çok kanalda satıyorsanız tek bir istekte `channel_token` vererek o isteği başka kanala yazdırabilirsiniz. Geçit hiçbir yerde veritabanı numarası kullanmaz: kanal, ödeme hesabı, işlem, kayıtlı kart, abonelik ve sipariş her zaman token'ıyla adlanır.
+Kanal token'ı entegrasyon için bir kez verilir ve her isteğe istemci yazar. Birden çok kanalda satıyorsanız tek bir istekte `channel_token` vererek o isteği başka kanala yazdırabilirsiniz. Geçit hiçbir yerde veritabanı numarası kullanmaz: kanal, ödeme hesabı, işlem, sipariş, abonelik, link ve kayıtlı kart her zaman token'ıyla anılır.
 
-İstek bir dakika içinde yanıt almazsa kesilir; süreyi `Options(timeout=...)` (saniye) ile değiştirebilirsiniz. İstekler standart kütüphanenin `urllib`'iyle gider; `requests` ya da `httpx` kullanmak isterseniz `post(url, headers, body, timeout)` metodu olan bir nesneyi `Client(options, transport=...)` ile verebilirsiniz.
+İstek bir dakika içinde yanıt almazsa kesilir; süreyi `Options(timeout=...)` (saniye) ile değiştirebilirsiniz. İstekler standart kütüphanenin `urllib`'iyle gider; `requests` ya da `httpx` kullanmak isterseniz `send(method, url, headers, body, timeout)` metodu olan bir nesneyi `Client(options, transport=...)` ile verebilirsiniz (GET isteklerinde `body` `None` gelir).
 
-İstekler `odemehub.request` modülündeki değişmez nesnelerdir ve alanları yalnızca adla verilir. İsteğe bağlı bir alanı vermezseniz gövdeye hiç yazılmaz. Kart numarası ve güvenlik kodu `repr()` çıktısına hiç girmez, böylece kart nesnesi yanlışlıkla loglansa da kart bilgisi görünmez.
+İstekler `odemehub.request` modülündeki değişmez nesnelerdir ve alanları yalnızca adla verilir. Tekil bir kaydı adlandıran alan her istekte `token`'dır (`RetrieveOrder(token=...)`, `RefundPayment(token=...)`). İsteğe bağlı bir alanı vermezseniz gövdeye hiç yazılmaz. Alanları SDK doğrulamaz; her kuralı geçit uygular ve reddettiğini `ValidationError` ile alan alan söyler. Kart numarası ve güvenlik kodu `repr()` çıktısına hiç girmez, böylece kart nesnesi yanlışlıkla loglansa da kart bilgisi görünmez.
+
+## Sabit değerler
+
+Para birimi, dönem, durumlar, kart şeması ve tipi gibi sabit kümeler `odemehub.enums` modülündedir ve `str` tabanlı `Enum`'dur: `Currency`, `Period`, `OrderStatus`, `SubscriptionStatus`, `TransactionStatus`, `PaymentStatus`, `SecurityType`, `RefundType`, `RefundStatus`, `CardScheme`, `CardType`, `WebhookEvent`. Bir üye geçidin gönderdiği metnin kendisidir ve ona eşittir (`TransactionStatus.SUCCESSFUL == "successful"`).
+
+İsteklerde bu alanlar üyeyle verilir (`currency=Currency.USD`, `period=Period.MONTHLY`). Yanıtlarda okunan değer üyeye çevrilir; geçit bu sürümün bilmediği yeni bir değer gönderirse SDK çökmez, değer geldiği gibi düz metin olarak kalır.
+
+## İmza
+
+Her istek üç başlıkla gider: `X-Api-Key`, `X-Timestamp` (Unix saniye) ve `X-Signature`. İmza, `"{timestamp}\n{METHOD}\n{path}\n{body}"` metni üzerinden gizli anahtarla alınan HMAC-SHA256'nın küçük harfli hex halidir. `path` adresin sorgu dizesiz yolu (`/api/1000000001/gateway/regular-payment`), `body` gönderilen JSON'ın kendisidir; GET isteklerinde boş dizedir. Zaman damgası sunucu saatinden 5 dakikadan uzak olamaz. Geçit her yanıtı aynı yöntemle imzalar; istemci yanıtı isteğin metodu ve yoluyla, yanıtın kendi `X-Timestamp` değeriyle doğrular.
+
+```python
+import hashlib
+import hmac
+
+text = f"{timestamp}\n{method}\n{path}\n".encode() + body
+hmac.new(api_secret.encode(), text, hashlib.sha256).hexdigest()
+```
+
+Test vektörü: `secret_test` anahtarıyla, `1700000000` anında, `/api/1000000001/gateway/regular-payment` yoluna `{"a":1}` gövdesiyle yapılan `POST` isteğinin imzası `4d6225c9dd46837418b40dd8140d76a24cd7520d81ff3b280bf98da8da6a8771`'dir. Aynı hesap `odemehub.Signature` sınıfındadır.
 
 ## Karttan doğrudan çekim
 
-Müşteriyi bankasına göndermeden çekim yapar. Başarılı yanıt, paranın alındığı anlamına gelir.
+Müşteri hiçbir yere gitmez. Başarılı yanıt, paranın alındığı anlamına gelir.
 
 ```python
-from odemehub.request import Card, Customer, RegularPayment
+from odemehub.request import Address, Card, Customer, RegularPayment
+
+customer = Customer(
+    reference="musteri-88",            # sizdeki müşteri anahtarı; kart saklanacaksa zorunlu
+    billing_address=Address(
+        firstname="Ahmet", lastname="Yılmaz",
+        email="ahmet@ornek.com", phone="05551112233",
+        address="Kızılırmak Mah. Dumlupınar Blv. No:3",
+        district="Çankaya", province="Ankara", country="TR",
+    ),
+)
+
+card = Card(
+    holder_name="AHMET YILMAZ",
+    number="5400360000000003",
+    expiry_month="12", expiry_year="2030",
+    security_code="000",
+    should_save=True,                  # isteğe bağlı: başarılı ödemeden sonra kartı sakla
+)
 
 payment = client.regular_payment(RegularPayment(
-    channel_reference="SIP-10231",          # işlemin sizdeki referansı
+    channel_reference="SIP-10231",     # sizdeki referans; en az bir rakam içermeli
     amount="450.00",
     installment_number=1,
     ip=request.remote_addr,
-    customer=Customer(
-        channel_reference="musteri-88",
-        firstname="Ahmet",
-        lastname="Yılmaz",
-        email="ahmet@ornek.com",
-        phone="05551112233",
-        address="Kızılırmak Mah. Dumlupınar Blv. No:3",
-        district="Çankaya",
-        province="Ankara",
-        country="Türkiye",
-    ),
-    card=Card(
-        holder_name="AHMET YILMAZ",
-        number="5400360000000003",
-        expiry_month="12",
-        expiry_year="2030",
-        security_code="000",
-    ),
+    customer=customer,
+    card=card,
 ))
 
 if payment.result.successful:
-    ...  # payment.transaction_token — ödemenin geçitteki token'ı; iade ve iptalde bununla adlandırılır
+    payment.transaction.token          # iade ve iptalde ödeme bununla adlandırılır
+    payment.transaction.payment_status # PaymentStatus.PAID
+    payment.saved_card                 # should_save verildiyse ve kart saklandıysa
 ```
 
-Tutarlar her zaman metindir (`"450.00"`): imzalanıp gönderildiği gibi kalır, yolda yuvarlanmaz.
+Reddedilen ödeme de bir sonuçtur: `result.successful` `False`, `result.message` neden. Yalnızca geçit isteğin kendisini reddederse (hatalı alan, yetki, hız sınırı) hata fırlatılır.
+
+Yanıtın `transaction` alanı ödemeyi bütünüyle söyler: `token`, `channel_token`, `channel_reference`, `status`, `payment_status`, `security_type`, `amount`, `base_amount`, `currency`, `installment_number`, `is_test`, `created_at`. `customer` ödemenin dondurduğu müşteridir (`reference` ve `billing_address`).
+
+Faturada şirket adı gerekiyorsa `company_title`, `tax_number` ve `tax_office` fatura adresine üçü birlikte verilir.
+
+Kayıtlı kartla ödemede `card` yerine `saved_card_token` verilir; ödeme kartın saklandığı hesaptan geçer, `payment_provider_token` gönderilmez. Kart hangi kanal ve müşteri referansıyla saklandıysa ödeme de aynılarını taşımalıdır.
+
+Tutarlar nokta ayraçlı ve en çok iki ondalıklı metindir: `"100"`, `"100.1"`, `"100.10"`. İmzalanıp gönderildiği gibi kalır, yolda yuvarlanmaz. Para birimi `Currency` ile verilir (`currency=Currency.USD`), boş bırakılırsa TRY'dir. Kart numarası gruplar arasında boşlukla da gönderilebilir.
 
 ## 3D ödeme
 
-3D'de çekim iki adımdır: siz ödemeyi başlatırsınız, müşteri bankasına gider, banka sonucu sizin adresinize gönderir.
+Siz ödemeyi başlatırsınız, müşteri bankasına gider, banka müşteriyi sizin adresinize geri yollar.
 
 ```python
 from odemehub.request import SecurePayment
@@ -88,461 +120,312 @@ payment = client.secure_payment(SecurePayment(
     amount="450.00",
     installment_number=1,
     ip=request.remote_addr,
-    callback_url="https://magazam.com/odeme/donus",
-    webhook_url="https://magazam.com/odemehub/odeme",   # isteğe bağlı, aşağıya bakın
     customer=customer,
+    callback_url="https://magazam.com/odeme/donus",
     card=card,
 ))
 
-if payment.result.successful:
-    return redirect(payment.redirect_url)   # müşteriyi bankaya gönderin
+if payment.redirect_url is not None:
+    return redirect(payment.redirect_url)              # müşteriyi bankaya gönderin
 ```
 
-Başarılı yanıt **ödeme alındı demek değildir**; yalnızca müşterinin gideceği adres hazır demektir.
+Başarılı yanıt ödeme alındı demek değildir; müşterinin gideceği adres hazır demektir. Adres 15 dakika geçerlidir ve bir kez açılır; süresinde açılmayan ödeme `expired` olur.
 
-Müşteriyi **15 dakika içinde** bu adrese yönlendirin. Sayfası o süre içinde açılmayan ödemenin süresi dolar (`expired`). Süresi dolmuş bağlantıyı açan müşteri doğrudan `callback_url` adresinize, `successful=0` ile geri gönderilir; `retrieve_payment()` sorgusu da başarısız sonucu ve nedenini döner.
-
-Banka işini bitirince müşteri, tarayıcısı üzerinden `callback_url` adresinize döner. O POST (form gövdesi) **sonucu taşımaz**, yalnızca sonucun hazır olduğunu haber verir:
-
-| Alan | Anlamı |
-| --- | --- |
-| `transaction_token` | ödemenin geçitteki token'ı |
-| `channel_reference` | sizin kendi referansınız |
-| `successful` | `1` / `0` — yalnızca ipucu, **güvenilmez** |
-
-Sonucu kendi imzalı bağlantınızdan sorun:
+Banka işini bitirince müşterinin tarayıcısı `callback_url` adresinize şu alanları POST eder: `transaction_token`, `channel_reference`, `successful` (`1`/`0`). Bu POST imzasızdır ve müşterinin tarayıcısından gelir; yalnızca ipucudur. Sonucu kendi imzalı bağlantınızdan sorun:
 
 ```python
 from odemehub.request import RetrievePayment
 
 @app.post("/odeme/donus")
 def odeme_donus():
-    outcome = client.retrieve_payment(RetrievePayment(
-        transaction_token=request.form["transaction_token"],
-    ))
+    outcome = client.retrieve_payment(RetrievePayment(token=request.form["transaction_token"]))
 
     if outcome.result.successful:
         ...  # siparişi ödendi olarak işaretleyin
 ```
 
-Neden böyle: o POST'u bizim sunucumuz değil, müşterinin tarayıcısı gönderir; tarayıcıya imzalayacak bir sır verilemez. `successful` alanına bakıp sipariş kapatmayın — onu herkes gönderebilir; yalnız "başarısız" ipucunda gereksiz sorgudan kaçınmak için kullanın. Geçide sorduğunuz yanıt ise her zaman imzalıdır ve SDK imzayı sizin için doğrular. Başkasının işlemini sorarsanız `ValidationError` alırsınız.
+Başkasının işlemini sorarsanız kayıt yokmuş gibi `NotFoundError` alırsınız.
 
-### Ödeme bildirimi (webhook)
+## Sipariş
 
-Müşteri bankadan sonra sekmeyi kapatırsa tarayıcı `callback_url` adresinize hiç dönmez. Bunun için ödemeyi başlatırken `webhook_url` verin: ödeme bankada bitince (ya da müşteri bankanın sayfasını hiç açmayıp süresi dolunca) geçidin **kendi sunucusu** o adrese imzalı bir POST gönderir. Gövde `retrieve_payment()` yanıtının aynısıdır, üstüne hangi duruma gelindiğini söyleyen `event` eklenir: `successful`, `failed` ya da `expired`. Gövdeyi abonelik bildirimindeki gibi **ham** okuyun.
-
-```python
-from odemehub import SignatureError
-
-@app.post("/odemehub/odeme")
-def odeme_bildirimi():
-    try:
-        webhook = client.transaction_webhook(request.get_data(), request.headers.get("X-Signature"))
-    except SignatureError:
-        return "", 400
-
-    if webhook.is_successful():
-        siparisi_odendi_isaretle(webhook.channel_reference, webhook.transaction_token)
-
-    return "", 200
-```
-
-Ödeme başlatılırken reddedilen (yanıtı anında aldığınız) ödeme için bildirim gitmez. Aynı sipariş için birden fazla deneme olabildiğinden bildirimi `transaction_token` ile tekilleştirin. 2xx dışında bir yanıt (ya da yanıtsızlık) başarısız sayılır; bildirim 5 dakika sonra bir kez daha denenir ve ulaşmayan bildirimler panelde işlemin sayfasında listelenir. Bildirim hiç gelmezse `retrieve_transactions()` ile sorabilirsiniz (aşağıda).
-
-### Bir referansın bütün denemeleri
-
-Elinizde yalnızca kendi sipariş numaranız varsa, o numara altında yapılmış **bütün** ödeme denemelerini — hangisi reddedildi, hangisi geçti — eskiden yeniye listeleyin:
+Kart sizde sorulmaz. Siparişi açarsınız, geçit kendi ödeme sayfasının adresini döner, müşteri orada öder. Tutar gönderilmez: geçit kalemleri ve seçilen gönderim yöntemini toplar. Birim tutarlar KDV dahildir.
 
 ```python
-from odemehub.request import RetrieveTransactions
+from odemehub.request import CreateOrder, Item, ShippingMethod
 
-attempts = client.retrieve_transactions(RetrieveTransactions(channel_reference="SIP-10232"))
-
-for attempt in attempts.transactions:
-    print(attempt.status, attempt.payment_status, attempt.error_message or "")
-
-paid = attempts.successful()   # geçen deneme ya da None
-```
-
-Her deneme `token`, `status` (`started`, `redirected_to_secure_page`, `returned_from_secure_page`, `failed`, `expired`, `successful`), `payment_status` (`unpaid`, `paid`, `cancelled`, `refunded`, `partially_refunded`), `security_type`, `amount` / `base_amount` / `currency`, `installment_number`, `is_test`, `error_code` / `error_message`, `created_at`, `customer_channel_reference`, `conversion` ve bağlı olduğu `order_token` / `subscription_token` alanlarını taşır. Ödeme sayfasından açılan siparişin denemeleri de siparişin referansı altında burada görünür.
-
-## Ürünler
-
-Sipariş kalemleri ve abonelikler ürünleri **sizdeki referanslarıyla** adlandırır. Ürünü panelde (Ürünler sayfası) tanımlayabilir ya da kendi kataloğunuzdan geçide yazabilirsiniz:
-
-```python
-from odemehub.request import SaveProduct
-
-product = client.save_product(SaveProduct(
-    channel_reference="KAHVE-MAKINESI",
-    name="Kahve makinesi",
-    type="simple",          # simple | recurring
-    amount="450.00",
-    tax_rate="20",          # fiyatın içindeki KDV oranı
-    image="https://magazam.com/img/kahve-makinesi.jpg",  # ödeme sayfasında gösterilir
-))
-
-client.save_product(SaveProduct(
-    channel_reference="PREMIUM-AYLIK",
-    name="Premium üyelik",
-    type="recurring",
-    amount="149.90",
-    tax_rate="20",
-    period="monthly",       # monthly | annually — yalnız recurring için zorunlu
-))
-```
-
-Aynı kanalda aynı referans aynı üründür: tekrar gönderirseniz ikinci ürün açılmaz, mevcut olan güncellenir. `currency` verilmezse TRY, `is_active` verilmezse `True` kabul edilir. Ürün silinmez; `is_active=False` ile satışa kapatılır. `image` yalnızca `https://` adres alır; göndermezseniz ürün mevcut görselini (panelden yüklenmiş olanı da) korur, boş metin gönderirseniz görsel kaldırılır.
-
-Ödeme istekleri ürünü hiçbir zaman değiştirmez; ürünün tek yazıldığı yer bu çağrı ve panel.
-
-## Ödeme sayfası
-
-Kart bilgisini hiç görmek istemiyorsanız sipariş açıp müşteriyi geçidin kendi sayfasına yollayabilirsiniz.
-
-```python
-from odemehub.request import OrderItem, OrderPayment
-
-order = client.order_payment(OrderPayment(
-    channel_reference="SIPARIS-10233",
-    success_url="https://magazam.com/tesekkurler",
+answer = client.create_order(CreateOrder(
+    channel_reference="SIP-10233",
+    success_url="https://magazam.com/odeme/donus",
+    items=[
+        Item(name="Kulaklık", unit_amount="1200.00", quantity=1, tax_rate="20", channel_reference="SKU-1"),
+    ],
+    customer=customer,                                   # bilinen kadarı; kalanı sayfada sorulur
+    shipping_methods=[
+        ShippingMethod(handle="standart", title="Standart Kargo", amount="49.90", tax_rate="20"),
+    ],
+    requires_shipping_address=True,
     cancel_url="https://magazam.com/sepet",
-    webhook_url="https://magazam.com/odemehub/siparis",   # isteğe bağlı, aşağıya bakın
+))
+
+answer.order.checkout_url      # müşteriyi buraya gönderin
+answer.order.amount            # geçidin hesapladığı toplam
+```
+
+Müşteri istediğiniz kadarıyla verilir: yalnız `reference`, fatura adresi (`billing_address`), gönderim adresi (`shipping_address`) ya da hiçbiri. Verilmeyenler ödeme sayfasında sorulur; referans verilmemişse geçit ödemede `guest-…` biçiminde bir referans üretir (`order.customer.is_guest()`).
+
+Yanıttaki `order` siparişi bütünüyle taşır (müşteri hem `answer.customer`'da hem `answer.order.customer`'dadır): `token`, `channel_reference`, `description`, `payment_provider_token`, `status` (`open` / `paid`), `items`, `shipping_methods`, seçilen `shipping_method`, `subtotal`, `shipping_amount`, `tax_amount`, `amount`, `currency`, `is_test`, `created_at`, `checkout_url` (ödenince `None`), ödeyen işlem `transaction` (açıkken `None`) ve `customer`.
+
+Ödendiğinde müşteri `success_url` adresinize 3D dönüşüyle aynı alanlarla POST edilir; `retrieve_order()` kesin sonucu verir.
+
+```python
+from odemehub.request import RetrieveOrder, UpdateOrder
+
+answer = client.retrieve_order(RetrieveOrder(token=token))
+answer.order.is_paid()
+answer.order.transaction.token if answer.order.transaction else None
+
+# Açık siparişte yalnızca gönderilen alanlar değişir; kalemler gönderilirse tamamı yenilenir.
+client.update_order(UpdateOrder(token=token, description="Hediye paketi", clear=["cancel_url"]))
+```
+
+Bir alanı vermemek onu olduğu gibi bırakır; boşaltmak için adını `clear` listesine yazın.
+
+`create_*` çağrıları aynı kanal ve referans için tekrarlanabilir: aynı referansla ikinci kez açılan sipariş, link ya da (henüz ödenmemiş) abonelik yeni gönderilenlerle güncellenir ve kendi token'ıyla döner. Ödenmiş sipariş değişmez. Ödeme sayfasında son 15 dakika içinde başlamış bir ödeme varken `create_*` ve `update_*` çağrıları `channel_reference` / `token` alanında reddedilir.
+
+## Ödeme linki
+
+Link, elinde olan herkesin ödeyebileceği bir sayfadır; kapatılana ya da son gününe kadar tekrar tekrar ödenir. Müşterisi yoktur.
+
+```python
+from odemehub.enums import Currency
+from odemehub.request import CreatePaymentLink, Item, RetrievePaymentLink, UpdatePaymentLink
+
+answer = client.create_payment_link(CreatePaymentLink(
+    items=[Item(name="Bağış", unit_amount="100.00", quantity=1, tax_rate="0")],
+    currency=Currency.TRY,
+    channel_reference="LNK-1",          # boş bırakılırsa geçit üretir
+    expires_at="2026-12-31",            # çalışma alanının saat dilimine göre son gün
+))
+
+link = answer.payment_link
+link.checkout_url                       # linkin kendisi; ödenemezken None
+link.expires_at                         # son an, UTC ISO 8601
+
+detail = client.retrieve_payment_link(RetrievePaymentLink(token=link.token))
+detail.transactions_count               # linkteki bütün ödemeler
+detail.transactions                     # son 50 ödeme, yeniden eskiye
+detail.successful()                     # bunlardan başarılı olanlar
+
+client.update_payment_link(UpdatePaymentLink(token=link.token, is_active=False))
+```
+
+`is_active` linkin şu an ödeme alıp almadığını (açık ve süresi dolmamış), `is_test` ödemelerinin test ortamında alındığını söyler. Kanal verilmezse link istemcinin kanalına açılır. Panelin açtığı linklere ulaşmak için kanal olarak `ChannelMessage.ODEMEHUB_CHANNEL` verin. 50'den eski ödemeler `retrieve_payments_by_channel_reference()` ile okunur.
+
+## Abonelik
+
+İlk yenileme ödeme sayfasında ödenir ve kart orada saklanır; sonrakiler o karttan çekilir. Müşteri referansı zorunludur. Hesap kart saklamalı ve 3D ödeme almalıdır.
+
+```python
+from odemehub.enums import Period, SubscriptionStatus
+from odemehub.request import CreateSubscription, Item, RetrieveSubscription, UpdateSubscription
+
+answer = client.create_subscription(CreateSubscription(
+    channel_reference="ABO-1",
+    period=Period.MONTHLY,              # DAILY | WEEKLY | MONTHLY | ANNUALLY
+    success_url="https://magazam.com/abonelik/donus",
+    items=[Item(name="Premium", unit_amount="99.90", quantity=1, tax_rate="20")],
     customer=customer,
-    items=[
-        OrderItem(channel_reference="KAHVE-MAKINESI"),
-        OrderItem(channel_reference="KAHVE-500G", quantity=2, unit_amount="180.00"),
-        OrderItem(channel_reference="HEDIYE-PAKETI", name="Hediye paketi", unit_amount="25.00", image="https://magazam.com/img/hediye-paketi.jpg"),
-    ],
+    renewal_limit=12,                   # boş: iptale kadar
 ))
 
-return redirect(order.checkout_url)
+answer.subscription.checkout_url
+
+current = client.retrieve_subscription(RetrieveSubscription(token=token)).subscription
+current.status                          # SubscriptionStatus.ACTIVE, PAST_DUE, ...
+current.renewal.paid_at                 # içinde bulunulan yenileme
+current.next_payment_at
+current.customer.reference
+
+# Dönem, kalemler, ödeme sayısı değişir; iptal de buradan:
+client.update_subscription(UpdateSubscription(token=token, status=SubscriptionStatus.CANCELLED))
 ```
 
-Sipariş tutarını göndermezsiniz; geçit kalemleri toplar ve `order.amount` olarak döner. Bir kalemin boş bıraktığı ad, fiyat ve KDV oranı kayıtlı üründen gelir; kalemde verdiğiniz değerler yalnızca o sipariş için geçerlidir, ürünü değiştirmez. Kayıtlı olmayan bir referansla da kalem gönderebilirsiniz, ama o zaman `name` ve `unit_amount` zorunludur. Kalemin `image` alanı (`https://` adres) ödeme sayfasında kalemin yanında gösterilir; verilmezse kayıtlı ürünün görseli kullanılır, ürün kayıtlı değilse kalem görselsiz görünür.
-
-Ödeme tamamlanınca müşteri, 3D'dekiyle aynı biçimde `success_url` adresinize döner: aynı üç alan gelir, sonucu yine `retrieve_payment()` ile sorarsınız. Müşteri ödeme sayfasında karttan kaynaklı bir hata alırsa size dönmez, sayfada kalıp başka kartla dener.
-
-Yanıt (`response.Order`) siparişi bütünüyle taşır: `token`, `channel_reference`, `description`, `status` (`open` / `paid`), `items`, `subtotal`, `tax_amount`, `amount`, `currency`, `is_test`, `created_at`, `checkout_url` (ödenince `None`) ve ödeyen işlemin token'ı `transaction_token` (açıkken `None`). Aynı nesne `retrieve_order()` ve sipariş bildiriminde de gelir.
-
-### Sipariş bildirimi (webhook) ve sipariş sorgusu
-
-Müşteri ödedikten sonra sekmeyi kapatırsa tarayıcı `success_url` adresinize hiç dönmez. Siparişi açarken `webhook_url` verirseniz sipariş ödendiği an geçidin **kendi sunucusu** o adrese imzalı bir POST gönderir; gövde `event: "paid"` ve siparişin kendisidir (`transaction_token` dolu gelir). Başarısız denemeler bildirilmez — sipariş açık kalır, müşteri sayfada yeniden dener.
-
-```python
-@app.post("/odemehub/siparis")
-def siparis_bildirimi():
-    try:
-        webhook = client.order_webhook(request.get_data(), request.headers.get("X-Signature"))
-    except SignatureError:
-        return "", 400
-
-    if webhook.is_paid():
-        siparisi_odendi_isaretle(webhook.order.channel_reference, webhook.order.transaction_token)
-
-    return "", 200
-```
-
-Elinizde siparişin token'ı varsa durumunu her zaman kendiniz de sorabilirsiniz:
-
-```python
-from odemehub.request import RetrieveOrder
-
-order = client.retrieve_order(RetrieveOrder(order_token=token))
-
-if order.is_paid():
-    ...   # order.transaction_token ile iade / iptal / retrieve_payment yapılabilir
-```
-
-Siparişin bütün denemelerini (reddedilenler dahil) görmek için `retrieve_transactions()` ile siparişin `channel_reference` değerini sorun.
-
-## Abonelikler
-
-Müşteriden dönem dönem tahsilat yapmak için abonelik açarsınız. Neye abone olunduğu bir ya da birkaç **abonelik ürünüdür** (`type="recurring"`), sizdeki referanslarıyla adlandırılır; fiyatı, para birimini ve dönemini ürün taşır. Aynı aboneliğe konan ürünlerin dönemi ve para birimi aynı olmalıdır. Bir kaleme `image` (`https://` adres) verirseniz ödeme sayfasında ürünün görseli yerine o gösterilir.
-
-```python
-from odemehub.request import SubscriptionItem, SubscriptionPayment
-
-subscription = client.subscription_payment(SubscriptionPayment(
-    channel_reference="UYELIK-4471",
-    items=[
-        SubscriptionItem(channel_reference="PREMIUM-AYLIK"),
-        SubscriptionItem(channel_reference="EK-KULLANICI", quantity=3),
-    ],
-    success_url="https://magazam.com/tesekkurler",
-    customer=customer,
-))
-
-subscription.token  # aboneliği sonra sorgulamak ve iptal etmek için saklayın
-
-return redirect(subscription.checkout_url)
-```
-
-Bir kaleme `unit_amount` verirseniz o fiyat **yalnızca ilk dönem** için geçerlidir (ör. ilk ay yarı fiyat); sonraki dönemler ürünün kendi fiyatından çekilir.
-
-İlk ödeme her zaman geçidin kendi sayfasında yapılır ve kart zorunlu olarak saklanır: sonraki dönemler o karttan çekilir. Ödeme tamamlanınca müşteri `success_url` adresinize döner ve sonucu yine `retrieve_payment()` ile sorarsınız; abonelik `active` olur ve aşağıdaki bildirim de gider.
-
-Dönem bitince yeni dönem açılır ve müşterinin varsayılan kartından çekilir. Banka kabul etmezse çekim bir buçuk gün içinde beş kez denenir (araları 3, 6, 9 ve 12 saat); bu sırada abonelik `active` kalır. Beşinci deneme de olmazsa abonelik `past_due` olur; çalışma alanı yöneticilerinize e-posta, `webhook_url` adresinize bildirim gider. İkisi de o dönemin dilediği kartla ödenebileceği bağlantıyı taşır; bağlantıyı müşterinize siz iletirsiniz. Süre sınırı yoktur; müşteri ödediği anda abonelik kaldığı yerden devam eder.
-
-Aboneliğin durumunu sorabilirsiniz:
-
-```python
-from odemehub.request import RetrieveSubscription
-
-subscription = client.retrieve_subscription(RetrieveSubscription(subscription_token=token))
-
-subscription.status        # pending | active | past_due | cancelled
-subscription.amount        # 149.90 — içinde bulunulan dönemin fiyatı
-subscription.ends_at       # sonraki tahsilat zamanı
-subscription.checkout_url  # ödenmemiş dönem varsa müşteriye verilecek adres
-
-for item in subscription.items:
-    print(f"{item.quantity} x {item.name} ({item.channel_reference})")
-
-if subscription.is_past_due():
-    ...  # müşteriyi kendi ödeme sayfanızda uyarabilirsiniz
-```
-
-Tutar, aboneliğin **içinde bulunduğu dönemin** fiyatıdır. Ürünün fiyatını yükseltirseniz yürüyen dönem çekildiği fiyatta kalır, yeni fiyat sonraki dönemden itibaren işler.
-
-İptalde ödenmiş günler yanmaz:
-
-```python
-from odemehub.request import CancelSubscription
-
-subscription = client.cancel_subscription(CancelSubscription(subscription_token=token))
-
-subscription.cancelled_at    # iptal edildiği an
-subscription.ends_at         # hizmetin süreceği son gün
-subscription.is_cancelled()  # ödenmiş dönem sürüyorsa henüz False
-```
-
-Müşteri, ödediği dönemin sonuna kadar hizmeti almaya devam eder; o güne kadar abonelik `active` görünür, dönem bitince `cancelled` olur ve bir daha tahsilat yapılmaz. Ödenmemiş bir aboneliğin (ilk ödemesi yapılmamış ya da `past_due`) iptali hemen geçerlidir. İade yapılmaz.
-
-Aboneliğin açılabilmesi için varsayılan ödeme hesabınızın kart saklayabiliyor olması gerekir; saklamayan bir hesapla açmaya çalışırsanız istek `subscription.payment_provider_token` alanında reddedilir.
-
-### Abonelik bildirimleri (webhook)
-
-Abonelik açarken `webhook_url` verirseniz, aboneliğin durumu her değiştiğinde o adrese imzalı bir POST gönderilir. Gövde düz JSON'dur ve imza `X-Signature` başlığındadır — yani geçidin API yanıtlarıyla aynı yöntem.
-
-```python
-subscription = client.subscription_payment(SubscriptionPayment(
-    channel_reference="UYELIK-4471",
-    items=[SubscriptionItem(channel_reference="PREMIUM-AYLIK")],
-    success_url="https://magazam.com/tesekkurler",
-    customer=customer,
-    webhook_url="https://magazam.com/odemehub/abonelik",
-))
-```
-
-Bildirimi karşılayan uçta gövdeyi **ham** okuyup imzayla birlikte SDK'ya verin. İmza gövdenin bayt bayt kendisini kapsar; gövdeyi ayrıştırıp yeniden yazarsanız imza tutmaz.
-
-```python
-from odemehub import SignatureError
-
-@app.post("/odemehub/abonelik")
-def abonelik_bildirimi():
-    try:
-        webhook = client.subscription_webhook(
-            request.get_data(),                  # Django: request.body
-            request.headers.get("X-Signature"),
-        )
-    except SignatureError:
-        return "", 400
-
-    subscription = webhook.subscription   # sorgudakiyle aynı nesne
-
-    if webhook.is_active():
-        abonelige_erisim_ac(subscription.channel_reference, subscription.ends_at)
-    elif webhook.is_past_due():
-        musteriyi_uyar(subscription.checkout_url)
-    elif webhook.is_cancelled():
-        yenilemeyi_durdur(subscription.ends_at)
-    elif webhook.is_ended():
-        erisimi_kapat(subscription.channel_reference)
-
-    return "", 200
-```
-
-Gönderilen olaylar aboneliğin **durumudur**, yapılan işlem değil:
-
-| Olay | Ne zaman gider |
-| --- | --- |
-| `active` | bir dönem ödendi (ilk ödeme ya da yenileme) |
-| `past_due` | dönem kayıtlı karttan tahsil edilemedi, müşteriden bekleniyor |
-| `cancelled` | abonelik iptal edildi; müşteri `ends_at` tarihine kadar hizmeti almaya devam eder |
-| `ended` | ödenmiş dönem doldu, abonelik kapandı |
-
-2xx dışında bir yanıt (ya da yanıtsızlık) başarısız sayılır; bildirim 5 dakika sonra bir kez daha denenir. Ulaşmayan bildirimler panelde aboneliğin sayfasında HTTP kodu ve yanıtıyla listelenir. Sipariş (`order_webhook()`) ve 3D ödeme (`transaction_webhook()`) bildirimleri de aynı yöntemle gider; her biri kendi adresine, kendi okuyucusuyla.
-
-## Ödeme hangi hesaptan geçer
-
-`payment_provider_token` verirseniz ödeme o hesaptan geçer; sipariş ve abonelik açarken de aynı alan vardır ve müşteri ödeme sayfasında o hesaptan öder. Vermezseniz hesabı çalışma alanınız seçer: panelde **Ödeme Ayarları → Gate (Yönlendirme)** altındaki kurallar sırayla denenir ve ödemenin karşıladığı ilk kural hesabı belirler. Kurallar kartın bankasına, şemasına, programına, tipine, ticari kart olup olmadığına, tutara ve para birimine bakabilir. Hiçbir kural tutmazsa ödeme varsayılan hesaptan geçer.
-
-- Kuralın hesabı ödemeyi alamıyorsa (ödeme türünü ya da para birimini desteklemiyorsa) o kural atlanır.
-- Kayıtlı kartla ödeme her zaman kartın saklandığı hesaptan geçer.
-- Taksitleri `retrieve_bin()` ile gösteriyorsanız orada da hesap vermeyin: taksitler ödemenin gideceği hesaptan gelir ve çekilen tutar gösterdiğinizle aynı olur.
-
-## Kur çevirisi
-
-Panelde **Ödeme Ayarları → Kur Çevirici** altında bir kural tanımladıysanız, o para biriminde gelen ödeme karttan kuralın para biriminde çekilir. Örneğin 100 USD istersiniz, karttan 4.985,56 TRY çekilir. Kur, TCMB'nin güncel döviz satış kuru ve üzerine eklediğiniz marjdır ya da sizin girdiğiniz sabit kurdur.
-
-İsteğinizde hiçbir şey değişmez: tutarı ve para birimini her zamanki gibi gönderirsiniz. Yanıttaki `conversion` karttan ne çekildiğini söyler:
-
-```python
-payment = client.regular_payment(RegularPayment(
-    amount="100.00",
-    currency="USD",
-    # ...
-))
-
-if payment.conversion is not None:
-    payment.conversion.amount    # 4985.56
-    payment.conversion.currency  # TRY
-    payment.conversion.rate      # 49.855560
-```
-
-- Çevrilmeyen ödemede `conversion` `None` gelir. `retrieve_payment()` aynı bilgiyi yeniden verir.
-- İade tutarını çekilen para biriminde gönderin (yukarıdaki örnekte TRY).
-- Güncel kur alınamıyorsa ödeme alınmaz; `422` ile `transaction.currency` alanında hata döner. Birkaç dakika sonra tekrar deneyin.
-
-## Kart sorgusu ve taksitler
-
-Kart numarasının ilk hanelerinden kartın kim tarafından verildiğini, hangi programa ait olduğunu ve tutarın kaç taksite bölünebileceğini sorar. Hiçbir şey çekilmez.
-
-```python
-from odemehub.request import RetrieveBin
-
-bin = client.retrieve_bin(RetrieveBin(bin="54003600", amount="450.00"))
-
-if bin.result.successful:
-    bin.issuer_name     # Garanti Bankası
-    bin.program         # Bonus
-    bin.scheme          # mastercard
-    bin.type            # credit
-    bin.is_commercial
-
-    for installment in bin.installments:
-        # 3 taksitte ayda 157.87, toplam 473.60
-        print(f"{installment.number} x {installment.amount} = {installment.total}")
-```
-
-Kartın tamamını göndermeyin; ilk 6-8 hane yeter ve yalnızca o kadarı kabul edilir.
-
-Sorgu başarısız dönebilir: kart tanınmıyor olabilir ya da hesabınızın sağlayıcısı taksit vermiyor olabilir. İki durumda da satışı durdurmayın, tek çekimle devam edin.
-
-## Tutarlar ve taksit
-
-İki tutar vardır ve karıştırılmamalıdır:
-
-| Alan | Anlamı |
-| --- | --- |
-| `amount` | **Karttan çekilecek** tutar. Vade farkı varsa içindedir. |
-| `base_amount` | **Sattığınız** tutar, vade farkından önceki hâli. Gönderilmezse `amount` ile aynı kabul edilir. |
-
-Taksit yalnızca Türk Lirası ödemelerde yapılır. USD, EUR ya da GBP ödemede `installment_number` `1` olmalıdır ve `retrieve_bin()` taksit listesini boş döner; kur çevirisiyle TRY'den başka bir para birimine çekilen ödeme için de aynısı geçerlidir.
-
-Taksitsiz satışta ikisi eşittir ve `base_amount` göndermenize gerek yoktur. Taksitli satışta `retrieve_bin` size o taksidin toplamını verir; onu `amount` olarak, sattığınız tutarı `base_amount` olarak gönderin:
-
-```python
-payment = client.regular_payment(RegularPayment(
-    channel_reference="SIP-10234",
-    amount="473.60",        # 3 taksitin toplamı
-    base_amount="450.00",   # satılan tutar
-    installment_number=3,
-    # ...
-))
-```
-
-Bazı sağlayıcılar vade farkını kendileri ekler; geçit bunu bilir ve gerekirse sağlayıcıya taban tutarı gönderir. Sizin tarafınızda değişen bir şey yoktur.
+İlk ödeme alındıktan sonra kanal, ödeme hesabı, para birimi, dönem ve `customer.reference` değiştirilemez; geçit bunları `ValidationError` ile reddeder. İptalde para iade edilmez; ödenmiş dönem sonuna kadar sürer, sonra abonelik biter. Ödenmiş dönem yoksa hemen `cancelled` olur.
 
 ## Kayıtlı kartlar
 
-Müşterinin kartını saklayıp sonraki ödemelerde numara sormadan çekim yapabilirsiniz.
+Kart ödeme sırasında (`should_save=True`) ya da ödemesiz saklanır. Kanal ve müşteri referansı ikilisinin altında durur.
 
 ```python
-from odemehub.request import DefaultSavedCard, DeleteSavedCard, NamedCustomer, SaveCard, SavedCards
+from odemehub.request import CreateSavedCard, DeleteSavedCard, RetrieveSavedCardsByReference, UpdateSavedCard
 
-# Ödeme sırasında saklamak için: Card'a should_save=True verin.
-# Ödeme olmadan saklamak için:
-kept = client.save_card(SaveCard(customer=customer, card=card))
+saved = client.create_saved_card(CreateSavedCard(customer=customer, card=card))
+saved.saved_card.token if saved.saved_card else None   # sağlayıcı saklamadıysa None, nedeni result.message
 
-musteri = NamedCustomer(channel_reference="musteri-88")
+cards = client.retrieve_saved_cards_by_reference(RetrieveSavedCardsByReference(customer_reference="musteri-88"))
+cards.default()                         # varsayılan kart, varsa
+cards.customer.reference
 
-# Müşterinin kartları
-cards = client.saved_cards(SavedCards(customer=musteri))
-
-# Varsayılan yapma / silme
-token = cards.saved_cards[0].token
-
-client.default_saved_card(DefaultSavedCard(customer=musteri, saved_card_token=token))
-client.delete_saved_card(DeleteSavedCard(customer=musteri, saved_card_token=token))
+client.update_saved_card(UpdateSavedCard(token=card_token))   # varsayılan yap
+client.delete_saved_card(DeleteSavedCard(token=card_token))
 ```
 
-Kayıtlı kartla ödeme alırken `card` yerine kartın token'ını verin:
-
-```python
-payment = client.regular_payment(RegularPayment(
-    channel_reference="SIP-10235",
-    amount="120.00",
-    installment_number=1,
-    ip=request.remote_addr,
-    customer=customer,
-    saved_card_token=token,
-))
-```
-
-`card` ile `saved_card_token` birlikte ya da hiçbiri verilmezse istek nesnesi oluşturulurken `ValueError` fırlatılır.
-
-Kart saklayan bir ödemenin yanıtında `payment.saved_card` dolu gelir; kartın token'ını oradan öğrenirsiniz. Kart her yerde token ile adlandırılır.
+Ödemesiz saklamada güvenlik kodu yalnızca bunu isteyen sağlayıcılarda gerekir; `security_code` verilmezse gönderilmez. Kayıtlı kart yanıtlarında kartın yalnızca ilk haneleri ve son dördü vardır.
 
 ## İade ve iptal
+
+Ödemenin token'ı yeter. İade, sağlayıcının kapattığı ödemeden kısmen ya da tamamen; iptal, henüz kapatılmamış ödemenin tamamı.
 
 ```python
 from odemehub.request import CancelPayment, RefundPayment
 
-# Gün sonu almamış ödemenin tamamını geri alır
-client.cancel_payment(CancelPayment(transaction_token=payment.transaction_token))
+refund = client.refund_payment(RefundPayment(token=token, amount="50.00"))  # tutar boş: kalanın tamamı
+refund.refund.amount if refund.refund else None    # gerçekten geri giden tutar
 
-# Tutar verilirse kısmi, verilmezse kalanın tamamı iade edilir.
-# Kur çevirisiyle çekilen ödemede tutar çekilen para birimindedir.
-client.refund_payment(RefundPayment(transaction_token=payment.transaction_token, amount="100.00"))
+cancel = client.cancel_payment(CancelPayment(token=token))
 ```
+
+Kur çevirisiyle çekilen ödemede iade tutarı çekilen para birimindedir.
+
+## Kart sorgusu ve taksitler
+
+Kartın ilk 6–8 hanesiyle bankası, tipi ve tutara göre taksit seçenekleri. Hiçbir şey çekilmez.
+
+```python
+from odemehub.request import RetrieveBin
+
+bin = client.retrieve_bin(RetrieveBin(bin="415565", amount="1200.00"))
+
+bin.issuer_name                         # Yapı Kredi
+bin.scheme                              # visa
+for installment in bin.installments:
+    print(f"{installment.number} x {installment.amount} = {installment.total}")
+```
+
+Hesap vermezseniz taksitler ödemenin yönlendirileceği hesaptan gelir; böylece çekilen tutar gösterdiğinizle aynı olur. Taksit yalnızca TRY ödemelerde vardır; başka para biriminde liste boş döner. Taksitli satışta taksidin toplamını `amount`, sattığınız tutarı `base_amount` olarak gönderin. Sorgu başarısız dönerse satışı durdurmayın, tek çekimle devam edin.
+
+## Referansla ve tarihle listeleme
+
+Her kaynak kendi referansıyla ya da bir tarih aralığıyla bulunur. Aralık en çok 7 gündür ve çalışma alanının saat dilimindedir; boş bırakılırsa son 7 gün.
+
+```python
+from odemehub.request import RetrievePaymentByReference, RetrievePaymentsByChannelReference
+
+# Yanıtı alınamayan bir ödemenin akıbeti: referanstaki son ödeme
+client.retrieve_payment_by_reference(RetrievePaymentByReference(channel_reference="SIP-10231"))
+
+# Kanaldaki bütün denemeler, reddedilenler dahil, durumu ve tutarıyla
+payments = client.retrieve_payments_by_channel_reference(RetrievePaymentsByChannelReference(
+    created_from="2026-09-26",
+    created_to="2026-10-02",
+))
+
+for transaction in payments.payments:
+    transaction.status                  # TransactionStatus; TIMEOUT: sağlayıcı yanıt vermedi
+    transaction.is_finished()           # SUCCESSFUL, FAILED ya da EXPIRED
+    transaction.payment_status          # PaymentStatus: PAID, REFUNDED, PARTIALLY_REFUNDED...
+    transaction.order_token             # ödeme sayfasından geldiyse sipariş, link ya da abonelik token'ı
+```
+
+Aynısı `retrieve_order_by_reference()` / `retrieve_orders_by_channel_reference()`, `retrieve_subscription_by_reference()` / `retrieve_subscriptions_by_channel_reference()`, `retrieve_payment_link_by_reference()` / `retrieve_payment_links_by_channel_reference()` için de geçerlidir. Sipariş ve abonelik listelerinde her kayıt kendi `customer` bilgisini taşır.
+
+## Webhook
+
+Sipariş ödendiğinde, link ödemesi alındığında, abonelik durum değiştirdiğinde, API ödemesi bittiğinde ve bir ödeme iade ya da iptal edildiğinde geçit imzalı JSON POST eder. Adresler kodda verilmez; panelde **Ayarlar → Webhook** sayfasında kanal, olay ve adres seçilerek tanımlanır.
+
+| Kaynak | Olaylar |
+| --- | --- |
+| Sipariş | `order.paid`, `order.payment_refunded`, `order.payment_cancelled` |
+| Ödeme linki | `payment_link.paid`, `payment_link.payment_refunded`, `payment_link.payment_cancelled` |
+| Abonelik | `subscription.active`, `subscription.past_due`, `subscription.cancelled`, `subscription.ended`, `subscription.completed`, `subscription.payment_refunded`, `subscription.payment_cancelled` |
+| API ödemesi | `transaction.successful`, `transaction.failed`, `transaction.expired`, `transaction.payment_refunded`, `transaction.payment_cancelled` |
+
+Sipariş, link ya da abonelikte alınan ödeme için `transaction.*` gelmez; o kaynağın kendi olayı gelir.
+
+**Webhook nihai sonuç değildir.** Gövde yalnızca kaynağın token'ını (para hareketi varsa yanında ödemenin token'ını) taşır. Kararı, token ile geçide sorduğunuz yanıta göre verin ve yanıtı kendi kaydınızla (referans, tutar, durum) karşılaştırın. Gövdeyi **ham** okuyun; ayrıştırıp yeniden yazarsanız imza tutmaz.
+
+```python
+from odemehub import SignatureError
+from odemehub.request import RetrieveOrder, RetrievePayment, RetrieveSubscription
+
+@app.post("/odemehub/webhook")
+def webhook():
+    try:
+        webhook = client.webhook(
+            request.method,
+            request.path,
+            request.get_data(),
+            request.headers.get("X-Timestamp"),
+            request.headers.get("X-Signature"),
+        )
+    except SignatureError:
+        return "", 401
+
+    webhook.id      # aynı bildirim tekrar gelebilir; bununla ayıklayın
+    webhook.event   # WebhookEvent.ORDER_PAID ...
+
+    if webhook.order_token is not None:
+        order = client.retrieve_order(RetrieveOrder(token=webhook.order_token)).order
+        order.status                          # OrderStatus.PAID
+        order.transaction.payment_status      # PaymentStatus.REFUNDED ...
+    elif webhook.subscription_token is not None:
+        subscription = client.retrieve_subscription(RetrieveSubscription(token=webhook.subscription_token)).subscription
+    elif webhook.transaction_token is not None:   # transaction.* ve payment_link.*
+        transaction = client.retrieve_payment(RetrievePayment(token=webhook.transaction_token)).transaction
+        transaction.payment_link_token        # linkte alınan ödemede linkin token'ı
+
+    return "", 204
+```
+
+Abonelik ve link ödemelerinin iade/iptal olaylarında `transaction_token` da gelir; `retrieve_payment()` yanıtındaki `order_token` / `payment_link_token` / `subscription_token` ödemenin gerçekten o kaynağa ait olduğunu gösterir. Yalnızca doğrulamak için `client.verify_webhook(...)` `bool` döner. Geçit 2xx yanıt alana kadar 60 sn, 5 dk, 15 dk ve 30 dk arayla toplam 5 kez dener; yönlendirmeleri izlemez.
 
 ## Hatalar
 
 Bütün hatalar `OdemehubError`'dan türer; tek bir `except` hepsini yakalar.
 
-| Hata | Ne demek |
-| --- | --- |
-| `ValidationError` | Gönderdiğiniz alanlar kabul edilmedi. Ödeme denenmedi. `error.errors` alan alan söyler. |
-| `AuthenticationError` | API anahtarı bu takıma ait değil ya da imza gizli anahtarla tutmuyor. |
-| `SignatureError` | Gelen yanıtın ya da bildirimin imzası tutmadı. Geçitten geldiği kanıtlanamaz; **işleme almayın**. |
-| `TransportError` | Geçide ulaşılamadı ya da yanıt okunamadı. Ödemenin ne olduğu belirsizdir; geçitteki kayıt asıl doğruyu söyler. |
-| `UnexpectedResponseError` | Beklenmeyen bir yanıt geldi. `error.status` HTTP kodunu verir. |
+| Hata | Durum | Anlamı |
+| --- | --- | --- |
+| `AuthenticationError` | 401 | API anahtarı yanlış, imza tutmuyor ya da zaman damgası aralık dışında |
+| `ForbiddenError` | 403 | Çalışma alanı işlem yapamıyor (ödenmemiş bakiye, plan) ya da plan bu özelliği kapsamıyor / modül kapalı |
+| `NotFoundError` | 404 | Token ya da referansla adlandırılan kayıt yok (başkasının kaydı da böyle yanıtlanır) |
+| `ValidationError` | 422 | Alan hataları; `error.errors` noktalı alan adıyla (`transaction.amount`, `order.items.0.name`) |
+| `RateLimitError` | 429 | İstek sınırı; `error.retry_after` saniye |
+| `SignatureError` | — | Yanıtın ya da bildirimin imzası doğrulanamadı; içeriğe güvenmeyin |
+| `TransportError` | — | Geçide ulaşılamadı; ödemenin akıbetini `retrieve_payment_by_reference()` ile sorun |
+| `UnexpectedResponseError` | diğer | Okunamayan yanıt ya da geçitte beklenmeyen hata (500); `error.status` |
 
 ```python
 from odemehub import OdemehubError, ValidationError
 
 try:
-    client.regular_payment(payment)
+    payment = client.regular_payment(payment_request)
 except ValidationError as error:
     print(error.errors)  # {'transaction.amount': ['...']}
 except OdemehubError as error:
-    print(error)
+    print(error)         # Türkçe
 ```
 
-Ağ hatasında ödemeyi körlemesine tekrarlamayın: `TransportError` "olmadı" demek değil, "bilmiyorum" demektir.
+Reddedilen ödeme, iade ya da kart saklama hata değildir; `result.successful` `False` ve `result.message` dolu döner. Ağ hatasında ödemeyi körlemesine tekrarlamayın: `TransportError` "olmadı" demek değil, "bilmiyorum" demektir.
 
-## İmzayı elle doğrulamak
+## İstek sınırları
 
-İmza, gövdenin tam metninin gizli anahtarla HMAC-SHA256'sıdır, küçük harf hex olarak yazılır. SDK bunu `Signature` sınıfıyla yapar; aynı hesabı kendiniz de yapabilirsiniz:
+Sınırlar çalışma alanı başına ve dakikalıktır:
 
-```python
-import hashlib
-import hmac
+| Sınır | Kapsam |
+| --- | --- |
+| 300 istek / dk | bütün uç noktalar |
+| 60 istek / dk | `secure-payment`, `regular-payment`, `refund-payment`, `cancel-payment`, `create-saved-card`, `delete-saved-card` (300'e ek olarak) |
 
-hmac.new(api_secret.encode(), body, hashlib.sha256).hexdigest()
-```
+Aşıldığında 429 ve `RateLimitError` döner; `retry_after` kadar bekleyip aynı isteği yeniden gönderin.
 
-Test vektörü: `secret_test` anahtarıyla `{"a":1}` gövdesinin imzası `6d0c951564cdd2b6b70e75b214293a8cd2542815ba54fe91c7f6ce105bc3d592`'dir.
+## 2.0.0'daki kırıcı değişiklikler
+
+1.x geçidin eski API'sine yazılmıştı; 2.0.0 bugünkü API'yi birebir izler.
+
+- **Uçlar:** `order_payment`, `subscription_payment`, `save_product`, `cancel_subscription`, `retrieve_transactions`, `save_card`, `saved_cards` ve `default_saved_card` kaldırıldı. Yerlerine `create_order`, `create_subscription`, `update_subscription(status=CANCELLED)`, `retrieve_payments_by_channel_reference`, `create_saved_card`, `retrieve_saved_cards_by_reference` ve `update_saved_card` geldi; ödeme linki, `update_*`, `*_by_reference` ve `*_by_channel_reference` uçları eklendi. Ürün kataloğu yok: kalemler (`Item`) adı ve fiyatıyla gönderilir.
+- **İmza:** gövde tek başına değil, `"{timestamp}\n{METHOD}\n{path}\n{body}"` imzalanır ve `X-Timestamp` başlığı eklenir. Tek bir kaydı soran `retrieve-*/{token}` uçları GET'tir.
+- **Transport:** özel transport'lar `post(url, headers, body, timeout)` yerine `send(method, url, headers, body, timeout)` uygular.
+- **İstekler:** tekil kaydı adlandıran alan her yerde `token` (`transaction_token`, `order_token`, `subscription_token`, `saved_card_token` istek alanları kalktı; kayıtlı kartla ödemedeki `saved_card_token` duruyor). Müşteri `reference` + `billing_address` / `shipping_address` (`Address`) oldu; şirket alanları fatura adresinde. Para birimi, dönem ve abonelik durumu `odemehub.enums` üyeleriyle verilir. `card` ile `saved_card_token`'ın birlikte verilmesi artık istemcide değil geçitte reddedilir.
+- **Yanıtlar:** geçidin JSON'unu iç içe yansıtır: `payment.transaction.token`, `payment.transaction.status`, `payment.customer.reference`, `refund.refund.amount`, `answer.order`, `answer.subscription`, `answer.payment_link`. `OrderDetails` / `SubscriptionDetails` müşteriyi üst seviyede `customer` olarak da taşır. Sabit kümeler `odemehub.enums` üyesi olarak okunur.
+- **Hatalar:** `ForbiddenError` (403), `NotFoundError` (404, eskiden 422 dönen bulunamayan kayıtlar) ve `RateLimitError` (429) eklendi.
+- **Webhook:** `order_webhook()`, `subscription_webhook()`, `transaction_webhook()` yerine tek `webhook(method, path, body, timestamp, signature)` (ve `verify_webhook()`); imza istek ve yanıtlarla aynı şemadadır. Gövde yalnızca token taşır (`order_token`, `payment_link_token`, `subscription_token`, `transaction_token`); durum `retrieve_*()` ile sorulur. Adresler panelde tanımlandığı için `SecurePayment`, `CreateOrder`, `UpdateOrder`, `CreateSubscription`, `UpdateSubscription` artık `webhook_url` almaz. `Signature.verify_body()` kalktı.
