@@ -29,10 +29,9 @@ Body = dict[str, Any]
 @dataclass(frozen=True, kw_only=True)
 class Options:
     """
-    The address the gateway is reached at, the credentials it is reached
-    with and the channel the caller speaks for. A credential pair belongs to
-    a single team, and the team is part of the address, so a pair only ever
-    opens its own team's endpoints.
+    The address the gateway is reached at and the credentials it is reached
+    with. A credential pair belongs to a single team, and the team is part of
+    the address, so a pair only ever opens its own team's endpoints.
     """
 
     #: The address the application is served from, e.g. https://app.odemehub.com.
@@ -40,11 +39,6 @@ class Options:
     #: The team the payments are made on behalf of: the ten-digit workspace id
     #: the Entegrasyon page shows.
     team: str
-    #: The channel every request speaks for: the shop, the marketplace or the
-    #: branch the customer reached the merchant through, by the token the
-    #: team's own Kanallar page gives it. A merchant selling on more than one
-    #: channel may still name another on a single request.
-    channel_token: str
     api_key: str = field(repr=False)
     api_secret: str = field(repr=False)
     #: How long a request may take, in seconds.
@@ -79,7 +73,7 @@ class Transport(Protocol):
     """
     How a signed request reaches the gateway. The client sends through
     urllib unless it is handed another, e.g. one built on requests or httpx.
-    A GET carries no body, and is handed None.
+    Every request is a POST with a JSON body.
     """
 
     def send(self, method: str, url: str, headers: Mapping[str, str], body: bytes | None, timeout: float) -> HttpResponse: ...
@@ -105,9 +99,7 @@ class Client:
     says it is.
 
     There is one method per endpoint, named after it: ``create-order`` is
-    ``create_order()``, and takes a ``request.CreateOrder``. The channel the
-    merchant speaks for is named once, on the options, and put into each
-    request wherever that endpoint expects it.
+    ``create_order()``, and takes a ``request.CreateOrder``.
     """
 
     #: The header the API key travels in.
@@ -124,7 +116,7 @@ class Client:
         """
         Start a payment the customer confirms with their bank. A successful
         answer is not a settled payment: the customer is still to be sent to
-        the address it comes back with, and ``retrieve_payment()`` says what
+        the address it comes back with, and ``retrieve_payments()`` says what
         became of it once they are back.
         """
         return response.SecurePayment.from_body(self._send(payment))
@@ -148,27 +140,13 @@ class Client:
         """
         return response.GiveBack.from_body(self._send(cancel))
 
-    def retrieve_payment(self, payment: request.RetrievePayment) -> response.Payment:
+    def retrieve_payments(self, payments: request.RetrievePayments | None = None) -> response.PaymentList:
         """
-        How a payment went. A customer sent to their bank comes back to the
-        merchant with the payment's token and a hint at how it went; the hint
-        is worth nothing on its own, and this call says what really became of it.
+        Payments as they stand — by token, every attempt under one of the
+        merchant's own references, or the ones made between two days; the
+        last seven days when nothing is named.
         """
-        return response.Payment.from_body(self._send(payment))
-
-    def retrieve_payment_by_reference(self, payment: request.RetrievePaymentByReference) -> response.Payment:
-        """
-        How the latest payment under one of the merchant's own references
-        went, for the merchant that sent a payment and never heard back.
-        """
-        return response.Payment.from_body(self._send(payment))
-
-    def retrieve_payments_by_channel_reference(self, payments: request.RetrievePaymentsByChannelReference) -> response.PaymentList:
-        """
-        Every payment attempt on a channel within a span of days, oldest
-        first, with each one's state, amount and what became of its money.
-        """
-        return response.PaymentList.from_body(self._send(payments))
+        return response.PaymentList.from_body(self._send(payments or request.RetrievePayments()))
 
     def retrieve_bin(self, retrieve_bin: request.RetrieveBin) -> response.Bin:
         """
@@ -188,17 +166,9 @@ class Client:
         """
         return response.OrderDetails.from_body(self._send(order))
 
-    def retrieve_order(self, order: request.RetrieveOrder) -> response.OrderDetails:
-        """Where an order stands, by its token."""
-        return response.OrderDetails.from_body(self._send(order))
-
-    def retrieve_order_by_reference(self, order: request.RetrieveOrderByReference) -> response.OrderDetails:
-        """Where the latest order under one of the merchant's own references stands."""
-        return response.OrderDetails.from_body(self._send(order))
-
-    def retrieve_orders_by_channel_reference(self, orders: request.RetrieveOrdersByChannelReference) -> response.OrderList:
-        """Every order opened on a channel within a span of days, oldest first."""
-        return response.OrderList.from_body(self._send(orders))
+    def retrieve_orders(self, orders: request.RetrieveOrders | None = None) -> response.OrderList:
+        """Orders as they stand, each with its customer."""
+        return response.OrderList.from_body(self._send(orders or request.RetrieveOrders()))
 
     def update_order(self, order: request.UpdateOrder) -> response.OrderDetails:
         """Change an open order. Only what is sent is written."""
@@ -213,20 +183,12 @@ class Client:
         """
         return response.PaymentLinkDetails.from_body(self._send(link))
 
-    def retrieve_payment_link(self, link: request.RetrievePaymentLink) -> response.PaymentLinkDetails:
+    def retrieve_payment_links(self, links: request.RetrievePaymentLinks | None = None) -> response.PaymentLinkList:
         """
-        A payment link as it stands, by its token, with how many payments
-        were made on it and the latest fifty of them.
+        Payment links as they stand, each with the latest fifty payment
+        attempts made on it and how many there have been in all.
         """
-        return response.PaymentLinkDetails.from_body(self._send(link))
-
-    def retrieve_payment_link_by_reference(self, link: request.RetrievePaymentLinkByReference) -> response.PaymentLinkDetails:
-        """A payment link as it stands, by the merchant's own reference for it."""
-        return response.PaymentLinkDetails.from_body(self._send(link))
-
-    def retrieve_payment_links_by_channel_reference(self, links: request.RetrievePaymentLinksByChannelReference) -> response.PaymentLinkList:
-        """Every payment link opened on a channel within a span of days, oldest first."""
-        return response.PaymentLinkList.from_body(self._send(links))
+        return response.PaymentLinkList.from_body(self._send(links or request.RetrievePaymentLinks()))
 
     def update_payment_link(self, link: request.UpdatePaymentLink) -> response.PaymentLinkDetails:
         """Change a payment link: its lines, its last day, whether it takes payments. Only what is sent is written."""
@@ -243,17 +205,9 @@ class Client:
         """
         return response.SubscriptionDetails.from_body(self._send(subscription))
 
-    def retrieve_subscription(self, subscription: request.RetrieveSubscription) -> response.SubscriptionDetails:
-        """Where a subscription stands, by its token."""
-        return response.SubscriptionDetails.from_body(self._send(subscription))
-
-    def retrieve_subscription_by_reference(self, subscription: request.RetrieveSubscriptionByReference) -> response.SubscriptionDetails:
-        """Where the latest subscription under one of the merchant's own references stands."""
-        return response.SubscriptionDetails.from_body(self._send(subscription))
-
-    def retrieve_subscriptions_by_channel_reference(self, subscriptions: request.RetrieveSubscriptionsByChannelReference) -> response.SubscriptionList:
-        """Every subscription opened on a channel within a span of days, oldest first."""
-        return response.SubscriptionList.from_body(self._send(subscriptions))
+    def retrieve_subscriptions(self, subscriptions: request.RetrieveSubscriptions | None = None) -> response.SubscriptionList:
+        """Subscriptions as they stand, each with its customer and the renewal it is on."""
+        return response.SubscriptionList.from_body(self._send(subscriptions or request.RetrieveSubscriptions()))
 
     def update_subscription(self, subscription: request.UpdateSubscription) -> response.SubscriptionDetails:
         """
@@ -270,13 +224,13 @@ class Client:
         """Keep a card for a customer without making a payment on it."""
         return response.SavedCardDetails.from_body(self._send(saved_card))
 
-    def retrieve_saved_card(self, saved_card: request.RetrieveSavedCard) -> response.SavedCardDetails:
-        """One kept card, by its token."""
-        return response.SavedCardDetails.from_body(self._send(saved_card))
-
-    def retrieve_saved_cards_by_reference(self, saved_cards: request.RetrieveSavedCardsByReference) -> response.SavedCardList:
-        """The cards kept for a customer, the default one first."""
-        return response.SavedCardList.from_body(self._send(saved_cards))
+    def retrieve_saved_cards(self, saved_cards: request.RetrieveSavedCards | None = None) -> response.SavedCardList:
+        """
+        Kept cards — by token, every card of a customer by their reference, or
+        the ones kept between two days — each with its customer, the default
+        first.
+        """
+        return response.SavedCardList.from_body(self._send(saved_cards or request.RetrieveSavedCards()))
 
     def update_saved_card(self, saved_card: request.UpdateSavedCard) -> response.SavedCardDetails:
         """Make one of a customer's kept cards the one they pay with unless they say otherwise."""
@@ -324,39 +278,25 @@ class Client:
         """
         Sign what is being asked for, hand it to the gateway and read the
         answer back. The body is signed exactly as it is sent, byte for byte,
-        so it is written once and used for both; a GET sends no body and
-        signs the empty string.
+        so it is written once and used for both.
         """
-        method = message.method
         endpoint = message.path()
         path = self._options.path(endpoint)
-        payload = b"" if method == "GET" else json.dumps(
-            message.to_body(self._options.channel_token),
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ).encode("utf-8")
+        payload = json.dumps(message.to_body(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
         headers = {
             self.API_KEY_HEADER: self._options.api_key,
-            **self._signature.headers(method, path, payload),
+            **self._signature.headers("POST", path, payload),
             "Accept": "application/json",
+            "Content-Type": "application/json",
         }
 
-        if method != "GET":
-            headers["Content-Type"] = "application/json"
-
         try:
-            answer = self._transport.send(
-                method,
-                self._options.url(endpoint),
-                headers,
-                None if method == "GET" else payload,
-                self._options.timeout,
-            )
+            answer = self._transport.send("POST", self._options.url(endpoint), headers, payload, self._options.timeout)
         except (OSError, http.client.HTTPException) as error:
             raise TransportError(f"Ödeme geçidine ulaşılamadı: {error}") from error
 
-        return self._read(answer, method, path)
+        return self._read(answer, "POST", path)
 
     def _read(self, answer: HttpResponse, method: str, path: str) -> Body:
         """

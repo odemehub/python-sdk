@@ -7,7 +7,7 @@ unexpected key never hides the outcome of a payment.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, TypeVar
 
@@ -204,26 +204,23 @@ class PaymentCustomer:
 class NamedCustomer:
     """
     Who an order or a subscription is for, as the gateway holds them: the
-    merchant's own key — or one of the form ``guest-…`` the gateway made up
-    for a payer the merchant never named — where they are billed, and where
-    the goods go when somebody said.
+    merchant's own key for them, where they are billed, and where the goods
+    go when somebody said. The key is None for an order opened for somebody
+    the team does not keep; the addresses are None until somebody gives them.
     """
 
-    reference: str
-    billing_address: Address
+    reference: str | None
+    billing_address: Address | None
     shipping_address: Address | None
-
-    def is_guest(self) -> bool:
-        """Whether the gateway made the reference up, for a payer nobody named."""
-        return self.reference.startswith("guest-")
 
     @classmethod
     def from_body(cls, customer: Body) -> NamedCustomer:
+        billing = customer.get("billing_address")
         shipping = customer.get("shipping_address")
 
         return cls(
-            reference=_string(customer.get("reference")),
-            billing_address=Address.from_body(_object(customer.get("billing_address"))),
+            reference=_said(customer.get("reference")),
+            billing_address=Address.from_body(billing) if isinstance(billing, dict) else None,
             shipping_address=Address.from_body(shipping) if isinstance(shipping, dict) else None,
         )
 
@@ -261,9 +258,13 @@ class SavedCard:
     #: Whether this is the card the customer pays with unless they say otherwise.
     is_default: bool
     created_at: str | None
+    #: Who the card is kept for; listed cards only, the other answers carry it beside the card.
+    customer: SavedCardCustomer | None = None
 
     @classmethod
     def from_body(cls, card: Body) -> SavedCard:
+        customer = card.get("customer")
+
         return cls(
             token=_string(card.get("token")),
             payment_provider_token=_string(card.get("payment_provider_token")),
@@ -275,23 +276,22 @@ class SavedCard:
             expiry_year=_string(card.get("expiry_year")),
             is_default=_boolean(card.get("is_default")),
             created_at=_said(card.get("created_at")),
+            customer=SavedCardCustomer.from_body(customer) if isinstance(customer, dict) else None,
         )
 
 
 @dataclass(frozen=True, kw_only=True)
 class TransactionReference:
     """
-    A payment named, and nothing more: its token in the gateway, the channel
-    it came in on, the reference it was made under and what became of its
-    money. It is how a paid order points at the payment that paid it, and
+    A payment named, and nothing more: its token in the gateway, the
+    reference it was made under and what became of its money. It is how a paid order points at the payment that paid it, and
     shows whether that money has since gone back.
     """
 
     #: The payment's token in the gateway, which names it again to ask after or give back.
     token: str
-    channel_token: str
     #: The reference the payment was made under in the calling system.
-    channel_reference: str
+    reference: str
     #: What became of the money: paid, cancelled, refunded, partially refunded.
     payment_status: PaymentStatus | str | None = None
 
@@ -299,8 +299,7 @@ class TransactionReference:
     def from_body(cls, transaction: Body) -> TransactionReference:
         return cls(
             token=_string(transaction.get("token")),
-            channel_token=_string(transaction.get("channel_token")),
-            channel_reference=_string(transaction.get("channel_reference")),
+            reference=_string(transaction.get("reference")),
             payment_status=_optional_known(PaymentStatus, transaction.get("payment_status")),
         )
 
@@ -316,10 +315,8 @@ class PaymentTransaction:
 
     #: The payment's token in the gateway, which names it again to ask after or give back.
     token: str
-    #: The channel the payment came in on.
-    channel_token: str
     #: The reference the payment was made under in the calling system.
-    channel_reference: str
+    reference: str
     #: The attempt's state.
     status: TransactionStatus | str
     #: What became of the money.
@@ -350,8 +347,7 @@ class PaymentTransaction:
     def from_body(cls, transaction: Body) -> PaymentTransaction:
         return cls(
             token=_string(transaction.get("token")),
-            channel_token=_string(transaction.get("channel_token")),
-            channel_reference=_string(transaction.get("channel_reference")),
+            reference=_string(transaction.get("reference")),
             status=_known(TransactionStatus, transaction.get("status")),
             payment_status=_known(PaymentStatus, transaction.get("payment_status")),
             security_type=_known(SecurityType, transaction.get("security_type")),
@@ -489,14 +485,14 @@ class Webhook:
     """
     A word the gateway sent about something of the merchant's: an order
     paid, a link paid, a subscription's state changed, a payment finished,
-    money given back. It goes to the addresses set for the thing's channel
+    money given back. It goes to the addresses the team set for the event
     under Webhook in the panel, as plain JSON signed the way every answer is.
 
     It is a notification, never the answer. It names the thing by token —
     and the payment beside it when money moved — and nothing else; ask the
-    gateway what became of it (``retrieve_order``, ``retrieve_payment_link``,
-    ``retrieve_subscription``, ``retrieve_payment``) and act on that. A word
-    may arrive more than once; the id tells the copies apart.
+    gateway what became of it (``retrieve_orders``, ``retrieve_payment_links``,
+    ``retrieve_subscriptions``, ``retrieve_payments``, by its token) and act
+    on that. A word may arrive more than once; the id tells the copies apart.
     """
 
     #: The word's own token, the same on every delivery of it.
@@ -537,10 +533,8 @@ class Transaction:
 
     #: The payment's token in the gateway, which names it again to ask after or give back.
     token: str
-    #: The channel the payment came in on.
-    channel_token: str
     #: The reference the payment was made under in the calling system.
-    channel_reference: str
+    reference: str
     #: The attempt's state.
     status: TransactionStatus | str
     #: What became of the money.
@@ -570,6 +564,8 @@ class Transaction:
     payment_link_token: str | None
     #: The token of the subscription this attempt paid a renewal of, when it did.
     subscription_token: str | None
+    #: The card the payment kept, when it asked to keep one and went through; None otherwise.
+    saved_card: SavedCard | None = None
 
     def is_successful(self) -> bool:
         """Whether the attempt went through."""
@@ -589,8 +585,7 @@ class Transaction:
 
         return cls(
             token=_string(transaction.get("token")),
-            channel_token=_string(transaction.get("channel_token")),
-            channel_reference=_string(transaction.get("channel_reference")),
+            reference=_string(transaction.get("reference")),
             status=_known(TransactionStatus, transaction.get("status")),
             payment_status=_known(PaymentStatus, transaction.get("payment_status")),
             security_type=_known(SecurityType, transaction.get("security_type")),
@@ -607,36 +602,39 @@ class Transaction:
             order_token=_said(_object(transaction.get("order")).get("token")),
             payment_link_token=_said(_object(transaction.get("payment_link")).get("token")),
             subscription_token=_said(_object(transaction.get("subscription")).get("token")),
+            saved_card=SavedCard.from_body(transaction["saved_card"]) if isinstance(transaction.get("saved_card"), dict) else None,
         )
 
 
 @dataclass(frozen=True, kw_only=True)
 class PaymentList:
     """
-    Every payment attempt made on a channel within a span of days, oldest
-    first, so they read as the attempts were made. The days answered are the
-    ones the gateway used: the ones asked for, or the last seven when none
-    were.
+    Payments asked after, each with its state, amount, customer and what
+    became of its money, the ones the bank turned away included. The answer is always a list, oldest first, and an empty one when
+    nothing matched. The days are the ones the gateway used, when the
+    records were asked for by the days they were made on: the ones asked
+    for, or the last seven when none were.
     """
 
     result: Result
-    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone.
-    created_from: str
+    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone; None
+    #: when they were asked for by token or reference.
+    created_from: str | None
     #: The last day listed, the same way.
-    created_to: str
+    created_to: str | None
     payments: list[Transaction]
 
     def successful(self) -> list[Transaction]:
-        """The attempts that went through."""
+        """The payments that went through."""
         return [payment for payment in self.payments if payment.is_successful()]
 
     @classmethod
     def from_body(cls, body: Body) -> PaymentList:
         return cls(
             result=Result.from_body(body),
-            created_from=_string(body.get("created_from")),
-            created_to=_string(body.get("created_to")),
-            payments=[Transaction.from_body(_object(payment)) for payment in _list(body.get("payments"))],
+            created_from=_said(body.get("created_from")),
+            created_to=_said(body.get("created_to")),
+            payments=[Transaction.from_body(_object(entry)) for entry in _list(body.get("payments"))],
         )
 
 
@@ -705,7 +703,7 @@ class Item:
     """One line of what an order, a subscription or a payment link is for, as it was written down."""
 
     #: The merchant's own key for what is on the line, if it gave one.
-    channel_reference: str | None
+    reference: str | None
     name: str
     #: The picture the line is shown with, if any.
     image: str | None
@@ -718,7 +716,7 @@ class Item:
     @classmethod
     def from_body(cls, item: Body) -> Item:
         return cls(
-            channel_reference=_said(item.get("channel_reference")),
+            reference=_said(item.get("reference")),
             name=_string(item.get("name")),
             image=_said(item.get("image")),
             quantity=_integer(item.get("quantity")),
@@ -732,7 +730,7 @@ class ShippingMethod:
     """One way the goods may be sent, as the merchant offered it."""
 
     #: The merchant's own key for it.
-    handle: str
+    reference: str
     #: What the payer sees.
     title: str
     #: What it costs, tax included.
@@ -743,7 +741,7 @@ class ShippingMethod:
     @classmethod
     def from_body(cls, method: Body) -> ShippingMethod:
         return cls(
-            handle=_string(method.get("handle")),
+            reference=_string(method.get("reference")),
             title=_string(method.get("title")),
             amount=_string(method.get("amount")),
             tax_rate=_string(method.get("tax_rate")),
@@ -759,10 +757,8 @@ class Order:
 
     #: The order's token in the gateway; name it to ask after or change it later.
     token: str
-    #: The channel the order was opened on.
-    channel_token: str
     #: The reference the order is known by in the calling system.
-    channel_reference: str
+    reference: str
     description: str | None
     #: The account the order was opened with; None when none was named, in
     #: which case it is picked when the customer pays.
@@ -770,8 +766,6 @@ class Order:
     #: Where the order stands: open until it is paid, then paid.
     status: OrderStatus | str
     items: list[Item]
-    #: The ways the goods may be sent, as the merchant offered them.
-    shipping_methods: list[ShippingMethod]
     #: The way the payer picked; None until they have.
     shipping_method: ShippingMethod | None
     #: What the lines come to before tax.
@@ -805,13 +799,11 @@ class Order:
 
         return cls(
             token=_string(order.get("token")),
-            channel_token=_string(order.get("channel_token")),
-            channel_reference=_string(order.get("channel_reference")),
+            reference=_string(order.get("reference")),
             description=_said(order.get("description")),
             payment_provider_token=_said(order.get("payment_provider_token")),
             status=_known(OrderStatus, order.get("status")),
             items=[Item.from_body(_object(item)) for item in _list(order.get("items"))],
-            shipping_methods=[ShippingMethod.from_body(_object(method)) for method in _list(order.get("shipping_methods"))],
             shipping_method=ShippingMethod.from_body(shipping_method) if isinstance(shipping_method, dict) else None,
             subtotal=_string(order.get("subtotal")),
             shipping_amount=_string(order.get("shipping_amount")),
@@ -829,8 +821,8 @@ class Order:
 @dataclass(frozen=True, kw_only=True)
 class OrderDetails:
     """
-    One order, as the gateway answers when it is opened, changed or asked
-    after: the order, and beside it who it is for. The customer is also on
+    One order, as the gateway answers when it is opened or changed: the
+    order, and beside it who it is for. The customer is also on
     the order itself, the way a listed one carries it.
     """
 
@@ -852,22 +844,28 @@ class OrderDetails:
 
 @dataclass(frozen=True, kw_only=True)
 class OrderList:
-    """Every order opened on a channel within a span of days, oldest first, each with whose it is."""
+    """
+    Orders asked after, each with its customer on ``Order.customer``. The answer is always a list, oldest first, and an empty one when
+    nothing matched. The days are the ones the gateway used, when the
+    records were asked for by the days they were made on: the ones asked
+    for, or the last seven when none were.
+    """
 
     result: Result
-    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone.
-    created_from: str
+    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone; None
+    #: when they were asked for by token or reference.
+    created_from: str | None
     #: The last day listed, the same way.
-    created_to: str
+    created_to: str | None
     orders: list[Order]
 
     @classmethod
     def from_body(cls, body: Body) -> OrderList:
         return cls(
             result=Result.from_body(body),
-            created_from=_string(body.get("created_from")),
-            created_to=_string(body.get("created_to")),
-            orders=[Order.from_body(_object(order)) for order in _list(body.get("orders"))],
+            created_from=_said(body.get("created_from")),
+            created_to=_said(body.get("created_to")),
+            orders=[Order.from_body(_object(entry)) for entry in _list(body.get("orders"))],
         )
 
 
@@ -880,10 +878,8 @@ class PaymentLink:
 
     #: The link's token in the gateway; name it to ask after or change it later.
     token: str
-    #: The channel the link is on; None for one on the team's own ödemehub channel.
-    channel_token: str | None
     #: The reference the link is known by: the merchant's, or one the gateway made up.
-    channel_reference: str
+    reference: str
     description: str | None
     #: The account the link is paid through; None when none was named.
     payment_provider_token: str | None
@@ -905,12 +901,22 @@ class PaymentLink:
     checkout_url: str | None
     created_at: str | None
 
+    #: The latest attempts made on the link, at most fifty, newest first, the
+    #: refused ones included; listed links only.
+    transactions: list[Transaction] = field(default_factory=list)
+    #: How many attempts have been made on the link in all, however many are
+    #: listed; None but on a listed link.
+    transactions_count: int | None = None
+
+    def successful(self) -> list[Transaction]:
+        """The listed attempts that went through."""
+        return [transaction for transaction in self.transactions if transaction.is_successful()]
+
     @classmethod
     def from_body(cls, link: Body) -> PaymentLink:
         return cls(
             token=_string(link.get("token")),
-            channel_token=_said(link.get("channel_token")),
-            channel_reference=_string(link.get("channel_reference")),
+            reference=_string(link.get("reference")),
             description=_said(link.get("description")),
             payment_provider_token=_said(link.get("payment_provider_token")),
             items=[Item.from_body(_object(item)) for item in _list(link.get("items"))],
@@ -923,60 +929,55 @@ class PaymentLink:
             expires_at=_said(link.get("expires_at")),
             checkout_url=_said(link.get("checkout_url")),
             created_at=_said(link.get("created_at")),
-        )
-
-
-@dataclass(frozen=True, kw_only=True)
-class PaymentLinkDetails:
-    """
-    One payment link, as the gateway answers when it is opened, changed or
-    asked after. Asked after by its token, it also says how many payments
-    were made on it and lists the latest fifty of them, newest first, the
-    ones the bank turned away included; the rest are read through
-    ``retrieve_payments_by_channel_reference()``.
-    """
-
-    result: Result
-    payment_link: PaymentLink
-    #: The latest payments made on the link; empty unless it was asked after by its token.
-    transactions: list[Transaction]
-    #: How many payments were made on the link in all; None unless it was asked after by its token.
-    transactions_count: int | None
-
-    def successful(self) -> list[Transaction]:
-        """The listed payments that went through."""
-        return [transaction for transaction in self.transactions if transaction.is_successful()]
-
-    @classmethod
-    def from_body(cls, body: Body) -> PaymentLinkDetails:
-        link = _object(body.get("payment_link"))
-
-        return cls(
-            result=Result.from_body(body),
-            payment_link=PaymentLink.from_body(link),
             transactions=[Transaction.from_body(_object(transaction)) for transaction in _list(link.get("transactions"))],
             transactions_count=_optional_integer(link.get("transactions_count")),
         )
 
 
 @dataclass(frozen=True, kw_only=True)
-class PaymentLinkList:
-    """Every payment link opened on a channel within a span of days, oldest first."""
+class PaymentLinkDetails:
+    """
+    The answer to opening or changing a payment link: the link as it now
+    stands. Its payments are on the link when it is asked after with
+    ``retrieve_payment_links()``.
+    """
 
     result: Result
-    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone.
-    created_from: str
+    payment_link: PaymentLink
+
+    @classmethod
+    def from_body(cls, body: Body) -> PaymentLinkDetails:
+        return cls(
+            result=Result.from_body(body),
+            payment_link=PaymentLink.from_body(_object(body.get("payment_link"))),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class PaymentLinkList:
+    """
+    Payment links asked after, each with how many payments were made on it
+    and the latest fifty of them. The answer is always a list, oldest first, and an empty one when
+    nothing matched. The days are the ones the gateway used, when the
+    records were asked for by the days they were made on: the ones asked
+    for, or the last seven when none were.
+    """
+
+    result: Result
+    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone; None
+    #: when they were asked for by token or reference.
+    created_from: str | None
     #: The last day listed, the same way.
-    created_to: str
+    created_to: str | None
     payment_links: list[PaymentLink]
 
     @classmethod
     def from_body(cls, body: Body) -> PaymentLinkList:
         return cls(
             result=Result.from_body(body),
-            created_from=_string(body.get("created_from")),
-            created_to=_string(body.get("created_to")),
-            payment_links=[PaymentLink.from_body(_object(link)) for link in _list(body.get("payment_links"))],
+            created_from=_said(body.get("created_from")),
+            created_to=_said(body.get("created_to")),
+            payment_links=[PaymentLink.from_body(_object(entry)) for entry in _list(body.get("payment_links"))],
         )
 
 
@@ -1022,10 +1023,8 @@ class Subscription:
 
     #: The subscription's token in the gateway; name it to ask after, change or cancel it.
     token: str
-    #: The channel the subscription was opened on.
-    channel_token: str
     #: The reference the subscription is known by in the calling system.
-    channel_reference: str
+    reference: str
     description: str | None
     #: The account it was opened with; None when none was named.
     payment_provider_token: str | None
@@ -1038,8 +1037,6 @@ class Subscription:
     #: How many renewals have been paid so far.
     renewals_paid: int
     items: list[Item]
-    #: The ways the goods may be sent, as the merchant offered them.
-    shipping_methods: list[ShippingMethod]
     #: The way the payer picked; None until they have.
     shipping_method: ShippingMethod | None
     subtotal: str
@@ -1100,8 +1097,7 @@ class Subscription:
 
         return cls(
             token=_string(subscription.get("token")),
-            channel_token=_string(subscription.get("channel_token")),
-            channel_reference=_string(subscription.get("channel_reference")),
+            reference=_string(subscription.get("reference")),
             description=_said(subscription.get("description")),
             payment_provider_token=_said(subscription.get("payment_provider_token")),
             status=_known(SubscriptionStatus, subscription.get("status")),
@@ -1109,7 +1105,6 @@ class Subscription:
             renewal_limit=_optional_integer(subscription.get("renewal_limit")),
             renewals_paid=_integer(subscription.get("renewals_paid")),
             items=[Item.from_body(_object(item)) for item in _list(subscription.get("items"))],
-            shipping_methods=[ShippingMethod.from_body(_object(method)) for method in _list(subscription.get("shipping_methods"))],
             shipping_method=ShippingMethod.from_body(shipping_method) if isinstance(shipping_method, dict) else None,
             subtotal=_string(subscription.get("subtotal")),
             shipping_amount=_string(subscription.get("shipping_amount")),
@@ -1129,9 +1124,9 @@ class Subscription:
 @dataclass(frozen=True, kw_only=True)
 class SubscriptionDetails:
     """
-    One subscription, as the gateway answers when it is opened, changed or
-    asked after: the subscription, and beside it who it is for. The customer
-    is also on the subscription itself, the way a listed one carries it.
+    One subscription, as the gateway answers when it is opened or changed:
+    the subscription, and beside it who it is for. The customer is also on
+    the subscription itself, the way a listed one carries it.
     """
 
     result: Result
@@ -1152,28 +1147,35 @@ class SubscriptionDetails:
 
 @dataclass(frozen=True, kw_only=True)
 class SubscriptionList:
-    """Every subscription opened on a channel within a span of days, oldest first, each with whose it is."""
+    """
+    Subscriptions asked after, each with its customer on
+    ``Subscription.customer``. The answer is always a list, oldest first, and an empty one when
+    nothing matched. The days are the ones the gateway used, when the
+    records were asked for by the days they were made on: the ones asked
+    for, or the last seven when none were.
+    """
 
     result: Result
-    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone.
-    created_from: str
+    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone; None
+    #: when they were asked for by token or reference.
+    created_from: str | None
     #: The last day listed, the same way.
-    created_to: str
+    created_to: str | None
     subscriptions: list[Subscription]
 
     @classmethod
     def from_body(cls, body: Body) -> SubscriptionList:
         return cls(
             result=Result.from_body(body),
-            created_from=_string(body.get("created_from")),
-            created_to=_string(body.get("created_to")),
-            subscriptions=[Subscription.from_body(_object(item)) for item in _list(body.get("subscriptions"))],
+            created_from=_said(body.get("created_from")),
+            created_to=_said(body.get("created_to")),
+            subscriptions=[Subscription.from_body(_object(entry)) for entry in _list(body.get("subscriptions"))],
         )
 
 
 @dataclass(frozen=True, kw_only=True)
 class SavedCardDetails:
-    """A kept card, as the gateway answers when it is kept, made the default or asked after."""
+    """A kept card, as the gateway answers when it is kept or made the default."""
 
     result: Result
     #: The card as it now stands, or None when the provider would not keep it.
@@ -1194,23 +1196,33 @@ class SavedCardDetails:
 
 @dataclass(frozen=True, kw_only=True)
 class SavedCardList:
-    """The cards a customer let the merchant keep, the default one first."""
+    """
+    Kept cards asked after, each with the customer it is kept for. A
+    customer's cards come with the one they pay with by default first. The answer is always a list, oldest first, and an empty one when
+    nothing matched. The days are the ones the gateway used, when the
+    records were asked for by the days they were made on: the ones asked
+    for, or the last seven when none were.
+    """
 
     result: Result
+    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone; None
+    #: when they were asked for by token or reference.
+    created_from: str | None
+    #: The last day listed, the same way.
+    created_to: str | None
     saved_cards: list[SavedCard]
-    #: The customer the cards belong to.
-    customer: SavedCardCustomer
 
     def default(self) -> SavedCard | None:
-        """The card the customer pays with unless they say otherwise, if there is one."""
+        """The card the customer pays with unless they say otherwise, when the cards were asked for by the customer's reference."""
         return next((card for card in self.saved_cards if card.is_default), None)
 
     @classmethod
     def from_body(cls, body: Body) -> SavedCardList:
         return cls(
             result=Result.from_body(body),
-            saved_cards=[SavedCard.from_body(_object(card)) for card in _list(body.get("saved_cards"))],
-            customer=SavedCardCustomer.from_body(_object(body.get("customer"))),
+            created_from=_said(body.get("created_from")),
+            created_to=_said(body.get("created_to")),
+            saved_cards=[SavedCard.from_body(_object(entry)) for entry in _list(body.get("saved_cards"))],
         )
 
 

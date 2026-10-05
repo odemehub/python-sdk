@@ -42,53 +42,20 @@ def _cleared(body: Body, clear: Sequence[str]) -> Body:
 @dataclass(frozen=True, kw_only=True)
 class Message:
     """
-    Something handed to the gateway: the endpoint it goes to, the method it
-    goes with and the body it is sent as. The body is built with the
-    client's channel handed in, because a message that speaks for a channel
-    puts it where its own endpoint expects it; one that does not, such as a
-    refund, never reads it.
+    Something handed to the gateway: the endpoint it is posted to and the
+    body it is sent as.
     """
 
     #: The endpoint this is sent to, under the team's gateway.
     endpoint: ClassVar[str]
 
-    #: The HTTP method this goes with. Everything is posted, except asking
-    #: after one record by its token.
-    method: ClassVar[str] = "POST"
-
     def path(self) -> str:
         """The endpoint, with the token in the address where the endpoint takes one."""
         return self.endpoint
 
-    def to_body(self, channel_token: str) -> Body:
-        """The request body. Empty for a message sent with GET, which carries nothing but its address."""
+    def to_body(self) -> Body:
+        """The request body."""
         raise NotImplementedError
-
-
-@dataclass(frozen=True, kw_only=True)
-class ChannelMessage(Message):
-    """
-    A message that speaks for one of the team's channels. The channel
-    belongs to the integration rather than to any one message, so it is
-    named once on the client; a merchant selling on more than one channel
-    names another here, on the single message that belongs elsewhere.
-    """
-
-    #: Stands for the team's own ödemehub channel, which has no token of its
-    #: own and is only ever reached by payment links: the panel opens its
-    #: links there. Give it as the channel of a payment link message to reach
-    #: those links.
-    ODEMEHUB_CHANNEL: ClassVar[str] = "odemehub"
-
-    #: The channel this one message speaks for. Left out, the client's own is used.
-    channel_token: str | None = None
-
-    def _channel(self, channel_token: str) -> str:
-        return self.channel_token if self.channel_token is not None else channel_token
-
-    def _link_channel(self, channel_token: str) -> str | None:
-        """The channel of a payment link message: the one it names, the client's, or none for ``ODEMEHUB_CHANNEL``."""
-        return None if self.channel_token == self.ODEMEHUB_CHANNEL else self._channel(channel_token)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -140,10 +107,12 @@ class Customer:
     for, or a card is kept for: the merchant's own key for them, where they
     are billed and, for goods, where those go.
 
-    The reference is what a kept card is held under, together with the
-    channel; a payment that keeps its card, a card kept on its own and a
-    subscription all need it. An order opened without one is given a
-    ``guest-…`` reference by the gateway once somebody pays.
+    The reference is what makes them one of the team's customers: the
+    customer is written under it once a payment for them goes through, and
+    their cards are kept for them and found again by it. It may be left out
+    of a payment or an order, and the payer is then nobody the team keeps;
+    but a payment that keeps its card, a card kept on its own and a
+    subscription have to carry it.
 
     Payments and kept cards take the reference and the billing address only;
     orders and subscriptions take any part of the three.
@@ -185,7 +154,7 @@ class Card:
     security_code: str | None = field(default=None, repr=False)
     #: Whether the customer asked for this card to be kept after a
     #: successful payment, so they can pay with it again without typing it
-    #: out. Needs a customer reference to be kept under, a plan that covers
+    #: out. Needs a customer reference to be kept for, a plan that covers
     #: saved cards and an account whose provider keeps cards. Read only by
     #: payments; left out, it is not sent.
     should_save: bool | None = None
@@ -215,55 +184,34 @@ class Item:
     unit_amount: str
     #: 1 to 9999.
     quantity: int
-    #: The tax inside the price, as a percentage: '20' or '20.00'.
-    tax_rate: str
+    #: The tax inside the price, as a percentage: '20' or '20.00'. Left out, the line carries no tax.
+    tax_rate: str | None = None
     #: The merchant's own key for what is on the line, if it has one.
-    channel_reference: str | None = None
+    reference: str | None = None
     #: The https address of the picture shown beside the line at checkout.
     image: str | None = None
+    #: Whether the line is also kept on the team's product list: written
+    #: there under its reference, or the product with that reference
+    #: brought up to the line. A line kept so has to carry a reference.
+    save_as_product: bool | None = None
 
     def to_body(self) -> Body:
         return _said({
-            "channel_reference": self.channel_reference,
+            "reference": self.reference,
             "name": self.name,
             "image": self.image,
             "quantity": self.quantity,
             "unit_amount": self.unit_amount,
             "tax_rate": self.tax_rate,
+            "save_as_product": self.save_as_product,
         })
-
-
-@dataclass(frozen=True, kw_only=True)
-class ShippingMethod:
-    """
-    One way the goods of an order or a subscription may be sent, offered to
-    the payer on the checkout page. The one they pick is added to what they
-    pay. The handle is the merchant's own key for it and has to be unique
-    within the list; the amount includes the tax, like an item's price.
-    """
-
-    handle: str
-    #: What the payer sees, e.g. 'Standart Kargo'.
-    title: str
-    #: What it costs, tax included, as digits with the kurus behind a point; '0' for free.
-    amount: str
-    #: The tax inside the amount, as a percentage.
-    tax_rate: str
-
-    def to_body(self) -> Body:
-        return {
-            "handle": self.handle,
-            "title": self.title,
-            "amount": self.amount,
-            "tax_rate": self.tax_rate,
-        }
 
 
 # Payments ------------------------------------------------------------------
 
 
 @dataclass(frozen=True, kw_only=True)
-class Payment(ChannelMessage):
+class Payment(Message):
     """
     A payment handed to the gateway. A payment is made with a card the
     customer typed in or with one they let the merchant keep, never with
@@ -273,22 +221,26 @@ class Payment(ChannelMessage):
     """
 
     #: The reference the payment is known by in the calling system, such as
-    #: SIP-10231. It has to carry at least one digit: its digits end the order
-    #: number the bank is sent, so the payment can be found in the bank's panel.
-    channel_reference: str
-    #: The amount, as digits with the kurus behind a point: '100', '100.1' or
-    #: '100.10'. A comma is refused. It is a string so that it is signed and
-    #: sent exactly as it is written here, with no rounding on the way.
+    #: SIP-10231. It has to carry at least one digit: its digits end the
+    #: order number the bank is sent, so the payment can be found in the
+    #: bank's panel by it.
+    reference: str
+    #: The amount, as digits with the kurus behind a point: '100', '100.1'
+    #: or '100.10'. A comma is refused. It is a string so that it is signed
+    #: and sent exactly as it is written here, with no rounding on the way.
     amount: str
-    #: 1 to 12. More than one only when the payment is asked for and charged in lira.
+    #: 1 to 12. More than one only for a payment asked for and charged in lira.
     installment_number: int
     #: The address the customer is paying from, as the merchant sees it.
     ip: str
-    #: Who is paying: the reference, if any, and the whole billing address.
+    #: Who is paying: the whole billing address and, when the merchant keeps
+    #: them, their reference. A payment that keeps its card, or is made with
+    #: a kept one, has to name the customer the card is theirs.
     customer: Customer
     #: The card typed in. Left out only when a kept card is named instead.
     card: Card | None = None
-    #: A card the customer let the merchant keep, by the token the gateway gave it.
+    #: A card the customer let the merchant keep, by the token the gateway
+    #: gave it.
     saved_card_token: str | None = None
     #: Left out, the gateway takes the lira.
     currency: Currency | None = None
@@ -302,11 +254,10 @@ class Payment(ChannelMessage):
     #: payments.
     base_amount: str | None = None
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         return _said({
             "transaction": _said({
-                "channel_token": self._channel(channel_token),
-                "channel_reference": self.channel_reference,
+                "reference": self.reference,
                 "payment_provider_token": self.payment_provider_token,
                 "amount": self.amount,
                 "base_amount": self.base_amount,
@@ -330,13 +281,12 @@ class SecurePayment(Payment):
 
     endpoint: ClassVar[str] = "secure-payment"
 
-    #: Where the customer's browser is posted back to once they are done at
-    #: their bank, with the payment's token and a hint at how it went. An
-    #: https address reachable from the internet.
+    #: Where the customer's browser is posted back to once the bank has
+    #: answered. An https address reachable from the internet.
     callback_url: str
 
-    def to_body(self, channel_token: str) -> Body:
-        body = super().to_body(channel_token)
+    def to_body(self) -> Body:
+        body = super().to_body()
         body["transaction"] = _said({
             **body["transaction"],
             "callback_url": self.callback_url,
@@ -364,15 +314,13 @@ class RefundPayment(Message):
 
     endpoint: ClassVar[str] = "refund-payment"
 
-    #: The payment's token in the gateway, as it answered when the payment was made.
+    #: The payment's token in the gateway.
     token: str
     #: How much goes back, as digits with the kurus behind a point: '35.50'.
-    #: Leave it out and everything the payment has left in it goes back. It
-    #: is never more than the payment has left: the gateway turns down
-    #: anything larger.
+    #: Left out, everything the payment has left in it goes back.
     amount: str | None = None
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         return _said({
             "transaction": {"token": self.token},
             "amount": self.amount,
@@ -383,15 +331,14 @@ class RefundPayment(Message):
 class CancelPayment(Message):
     """
     The whole of a payment taken back before the provider has settled it.
-    There is no amount to name: anything less goes back as a refund.
     """
 
     endpoint: ClassVar[str] = "cancel-payment"
 
-    #: The payment's token in the gateway, as it answered when the payment was made.
+    #: The payment's token in the gateway.
     token: str
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         return {"transaction": {"token": self.token}}
 
 
@@ -407,17 +354,15 @@ class RetrieveBin(Message):
 
     #: The first six to eight digits of the card.
     bin: str
-    #: What the payment would come to, as digits with the kurus behind a point: '1000.00'.
+    #: What the payment would come to, as digits with the kurus behind a point.
     amount: str
     #: The account to ask. Left out, the account the team's routing rules
-    #: would send the card to is asked — the default one when none of them
-    #: holds — so the instalments match a payment that names no account either.
+    #: would send the card to is asked.
     payment_provider_token: str | None = None
     #: The money the payment is taken in; the lira unless another is named.
-    #: Instalments are only answered in lira.
     currency: Currency | None = None
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         return {
             "transaction": _said({
                 "payment_provider_token": self.payment_provider_token,
@@ -432,133 +377,116 @@ class RetrieveBin(Message):
 
 
 @dataclass(frozen=True, kw_only=True)
-class RetrieveByToken(Message):
+class Retrieve(Message):
     """
-    One record asked after by the token the gateway gave it, as
-    ``GET retrieve-{resource}/{token}``. There is no body: the signature is
-    taken over the empty string, and the token travels in the address. A
-    caller only ever reaches its own team's records; anybody else's is
-    answered as not found.
-    """
-
-    method: ClassVar[str] = "GET"
-
-    #: The record's token in the gateway, as it answered when the record was made.
-    token: str
-
-    def path(self) -> str:
-        return f"{self.endpoint}/{self.token}"
-
-    def to_body(self, channel_token: str) -> Body:
-        return {}
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrieveByReference(ChannelMessage):
-    """
-    One record asked after by the merchant's own reference for it on a
-    channel. The latest record under that pair is answered: the merchant
-    that opened something and lost its token, or never heard back, finds it
-    again this way. Nothing is changed by asking.
+    Asking after records of one kind. They are named one of three ways: by
+    the token the gateway gave one, by the merchant's own reference for
+    them, or by the days they were made on, as ``YYYY-MM-DD`` in the team's
+    own timezone, both included and at most seven days apart. Asked with
+    none of these, it is the last seven days up to today. The answer is
+    always a list, oldest first, and an empty one when nothing matches.
+    Nothing is changed by asking.
     """
 
-    #: The reference the record was made under in the calling system.
-    channel_reference: str
+    #: The field the merchant's own reference travels in.
+    reference_field: ClassVar[str] = "reference"
 
-    def to_body(self, channel_token: str) -> Body:
-        return {
-            "channel_token": self._channel(channel_token),
-            "channel_reference": self.channel_reference,
-        }
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrieveByChannelReference(ChannelMessage):
-    """
-    Every record of a kind made on a channel within a span of days, oldest
-    first. The days are given as ``YYYY-MM-DD`` in the team's own timezone,
-    both included, and the span may be at most seven days; the two are given
-    together or not at all, and left out they mean the last seven days up to
-    today. Nothing is changed by asking.
-    """
-
-    #: The first day, ``YYYY-MM-DD``. Given together with ``created_to``.
+    #: The record's token in the gateway.
+    token: str | None = None
+    #: The merchant's own reference for them.
+    reference: str | None = None
+    #: The first day, as ``YYYY-MM-DD``. Given together with ``created_to``.
     created_from: str | None = None
-    #: The last day, ``YYYY-MM-DD``, at most six days after the first.
+    #: The last day, as ``YYYY-MM-DD``, at most six days after the first.
     created_to: str | None = None
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         return _said({
-            "channel_token": self._channel(channel_token),
+            "token": self.token,
+            self.reference_field: self.reference,
             "created_from": self.created_from,
             "created_to": self.created_to,
         })
 
 
 @dataclass(frozen=True, kw_only=True)
-class RetrievePayment(RetrieveByToken):
+class RetrievePayments(Retrieve):
     """
-    How a payment went, asked for after the fact. A customer sent to their
-    bank comes back carrying the payment's token and nothing more, because
-    a browser cannot be given anything to sign with; this is the call that
-    says what became of it.
+    Payments asked after: one by its token, every attempt made under the
+    merchant's reference, or the ones made between two days — the ones the
+    bank turned away included, and the ones made on the gateway's own
+    checkout page too.
     """
 
-    endpoint: ClassVar[str] = "retrieve-payment"
+    endpoint: ClassVar[str] = "retrieve-payments"
 
 
 @dataclass(frozen=True, kw_only=True)
-class RetrievePaymentByReference(RetrieveByReference):
-    """
-    The latest payment made under one of the merchant's own references on a
-    channel. The merchant that sent a payment and never heard the answer —
-    the connection dropped — finds out here whether it was made, without
-    trying it again.
-    """
+class RetrieveOrders(Retrieve):
+    """Orders asked after, each with its customer."""
 
-    endpoint: ClassVar[str] = "retrieve-payment-by-reference"
+    endpoint: ClassVar[str] = "retrieve-orders"
 
 
 @dataclass(frozen=True, kw_only=True)
-class RetrievePaymentsByChannelReference(RetrieveByChannelReference):
+class RetrieveSubscriptions(Retrieve):
+    """Subscriptions asked after, each with its customer and the renewal it is on."""
+
+    endpoint: ClassVar[str] = "retrieve-subscriptions"
+
+
+@dataclass(frozen=True, kw_only=True)
+class RetrievePaymentLinks(Retrieve):
     """
-    Every payment attempt made on a channel within a span of days, the
-    refused and the expired ones included, and the ones made on the
-    gateway's own checkout page too.
+    Payment links asked after, each with how many payments were made on it
+    and the latest fifty of them.
     """
 
-    endpoint: ClassVar[str] = "retrieve-payments-by-channel-reference"
+    endpoint: ClassVar[str] = "retrieve-payment-links"
+
+
+@dataclass(frozen=True, kw_only=True)
+class RetrieveSavedCards(Retrieve):
+    """
+    Kept cards asked after: one by its token, every card of a customer by
+    the merchant's reference for them (``reference``), or the ones kept
+    between two days. A customer's cards come with the one they pay with by
+    default first.
+    """
+
+    endpoint: ClassVar[str] = "retrieve-saved-cards"
+    reference_field: ClassVar[str] = "customer_reference"
 
 
 # Orders and subscriptions --------------------------------------------------
 
 
 @dataclass(frozen=True, kw_only=True)
-class CheckoutMessage(ChannelMessage):
+class CheckoutMessage(Message):
     """
     An order or a subscription, opened or changed, to be paid on the
     gateway's own checkout page. Nothing is charged here: the answer carries
     the address to send the customer to, and they give their card there.
 
     What it comes to is not sent. The gateway adds up the lines and the
-    shipping method the payer picks and answers with the amount, so the
-    total can never disagree with what it is made up of. The customer is
-    whatever is known: it is filled in on the checkout page and the payer is
-    asked for the rest.
+    shipping method the payer picks from the team's own list and answers
+    with the amount, so the total can never disagree with what it is made
+    up of. The customer is whatever is known: it is filled in on the
+    checkout page and the payer is asked for the rest.
 
-    Opening is idempotent per channel and reference: opening again under a
-    reference that already has an open order or subscription overwrites it
-    with what is sent and answers with the one that was there, under its
-    own token. A paid order, or a subscription that has been paid, is not
-    touched, and neither is one with a payment under way — the gateway says
-    so on ``channel_reference``.
+    Opening is idempotent per reference: opening again under a reference
+    that already has an open order or subscription overwrites it with what
+    is sent and answers with the one that was there, under its own token. A
+    paid order, or a subscription that has been paid, is not touched, and
+    neither is one with a payment under way — the gateway says so on
+    ``reference``.
     """
 
     #: The key the group travels under: order or subscription.
     group: ClassVar[str]
 
     #: The reference it is known by in the calling system. Has to carry at least one digit.
-    channel_reference: str | None = None
+    reference: str | None = None
     #: Where the customer's browser is posted back to once it is paid, with
     #: the payment's token. An https address reachable from the internet.
     success_url: str | None = None
@@ -576,30 +504,24 @@ class CheckoutMessage(ChannelMessage):
     #: rules pick the account when the customer pays, and its default account
     #: is used where none of them holds.
     payment_provider_token: str | None = None
-    #: Whether the checkout page asks the payer where the goods go.
-    requires_shipping_address: bool | None = None
-    #: How the goods may be sent, for the payer to pick from; up to twenty.
-    #: Sent on a change, they replace the ones there were, and an empty list
-    #: removes them all.
-    shipping_methods: Sequence[ShippingMethod] | None = None
+    #: Whether the checkout page asks the payer where the goods go. One who
+    #: is picks a way of sending from the team's own list, of those that
+    #: send there, and its price is added to the amount.
+    requires_shipping: bool | None = None
 
-    def _details(self, channel: str | None) -> Body:
-        """The group's fields, with what the caller left unsaid left out."""
+    def _details(self) -> Body:
         return _said({
-            "channel_token": channel,
-            "channel_reference": self.channel_reference,
+            "reference": self.reference,
             "description": self.description,
             "payment_provider_token": self.payment_provider_token,
             "currency": _value(self.currency),
             "success_url": self.success_url,
             "cancel_url": self.cancel_url,
-            "requires_shipping_address": self.requires_shipping_address,
+            "requires_shipping": self.requires_shipping,
             "items": None if self.items is None else [item.to_body() for item in self.items],
-            "shipping_methods": None if self.shipping_methods is None else [method.to_body() for method in self.shipping_methods],
         })
 
     def _body(self, group: Body) -> Body:
-        """The body: the group and, beside it, the customer when one was given."""
         return _said({
             self.group: group,
             "customer": None if self.customer is None else self.customer.to_body(),
@@ -611,44 +533,22 @@ class CreateOrder(CheckoutMessage):
     """
     An order opened to be paid once on the gateway's own checkout page. The
     answer carries ``checkout_url``; the customer is sent there, pays, and
-    is posted back to ``success_url``. The addresses set for the order's
-    channel under Webhook in the panel hear that it was paid whether or not
-    the customer comes back.
+    is posted back to ``success_url``. The addresses the team set under
+    Webhook in the panel hear that it was paid whether or not the customer
+    comes back. The customer may be left out, or sent without a reference:
+    the payer then says who they are on the checkout, and is not kept as
+    one of the team's customers.
     """
 
     endpoint: ClassVar[str] = "create-order"
     group: ClassVar[str] = "order"
 
-    channel_reference: str
+    reference: str
     success_url: str
     items: Sequence[Item]
 
-    def to_body(self, channel_token: str) -> Body:
-        return self._body(self._details(self._channel(channel_token)))
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrieveOrder(RetrieveByToken):
-    """
-    Where an order stands: what it is for, whether it has been paid and, if
-    so, by which payment. Nothing is changed by asking.
-    """
-
-    endpoint: ClassVar[str] = "retrieve-order"
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrieveOrderByReference(RetrieveByReference):
-    """The latest order opened under one of the merchant's own references on a channel."""
-
-    endpoint: ClassVar[str] = "retrieve-order-by-reference"
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrieveOrdersByChannelReference(RetrieveByChannelReference):
-    """Every order opened on a channel within a span of days, each with whose it is."""
-
-    endpoint: ClassVar[str] = "retrieve-orders-by-channel-reference"
+    def to_body(self) -> Body:
+        return self._body(self._details())
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -657,12 +557,9 @@ class UpdateOrder(CheckoutMessage):
     A change to an open order, named by its token in the address and again
     in the body. Only what is sent is written: a field left out keeps what
     there was, lines sent replace every line there was, and the customer
-    sent is written over the one the order had. A paid order, or one with a
-    payment under way, cannot be changed; the gateway says so on ``token``.
-
-    The channel is written only when this message names one; the client's
-    own is not sent, so a change never moves an order between channels by
-    accident.
+    sent is written over the one the order had; a reference sent takes the
+    place of the one there was. A paid order, or one with a payment under
+    way, cannot be changed; the gateway says so on ``token``.
     """
 
     endpoint: ClassVar[str] = "update-order"
@@ -676,10 +573,10 @@ class UpdateOrder(CheckoutMessage):
     def path(self) -> str:
         return f"{self.endpoint}/{self.token}"
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         return {
             "token": self.token,
-            **self._body(_cleared(self._details(self.channel_token), self.clear)),
+            **self._body(_cleared(self._details(), self.clear)),
         }
 
 
@@ -688,55 +585,31 @@ class CreateSubscription(CheckoutMessage):
     """
     A subscription opened for a customer, its first renewal paid on the
     gateway's own checkout page. Nothing is charged here: the answer carries
-    the address to send the customer to. The card is kept there, because the
-    renewals to come are taken from it, so the account has to keep cards and
-    take 3D payments, and the customer's reference is required.
+    the address to send the customer to. The card is kept there for the
+    customer, because the renewals to come are taken from it, so the account
+    has to keep cards and take 3D payments, and the customer's reference is
+    required.
     """
 
     endpoint: ClassVar[str] = "create-subscription"
     group: ClassVar[str] = "subscription"
 
-    channel_reference: str
+    reference: str
     success_url: str
     items: Sequence[Item]
-    #: Who is subscribing; the reference is required.
+    #: Who it is for; the reference is required, the rest is asked on the checkout page.
     customer: Customer
-    #: How often a renewal comes round.
+    #: How often it renews.
     period: Period
-    #: How many renewals are paid in all, 1 to 1000, after which it is
-    #: completed. Left out, it runs until it is called off.
+    #: How many renewals are paid in all, 1 to 1000. Left out, it runs until it is called off.
     renewal_limit: int | None = None
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         return self._body(_said({
-            **self._details(self._channel(channel_token)),
+            **self._details(),
             "period": _value(self.period),
             "renewal_limit": self.renewal_limit,
         }))
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrieveSubscription(RetrieveByToken):
-    """
-    Where a subscription stands: what it is for, the renewal it is on and
-    whether that renewal has been paid for. Nothing is changed by asking.
-    """
-
-    endpoint: ClassVar[str] = "retrieve-subscription"
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrieveSubscriptionByReference(RetrieveByReference):
-    """The latest subscription opened under one of the merchant's own references on a channel."""
-
-    endpoint: ClassVar[str] = "retrieve-subscription-by-reference"
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrieveSubscriptionsByChannelReference(RetrieveByChannelReference):
-    """Every subscription opened on a channel within a span of days, each with whose it is."""
-
-    endpoint: ClassVar[str] = "retrieve-subscriptions-by-channel-reference"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -750,11 +623,9 @@ class UpdateSubscription(CheckoutMessage):
     paid for, and nothing is charged after that.
 
     Until the first payment anything about it may be changed. Once it has
-    been paid, what it renews on stays as it was opened — the channel, the
-    customer's reference, the account, the money and how often it renews —
-    and the gateway turns down a change to any of them.
-
-    The channel is written only when this message names one.
+    been paid, only the status, the period, the renewal limit and the
+    prices of the same lines may change; the gateway turns down anything
+    else, the customer included.
     """
 
     endpoint: ClassVar[str] = "update-subscription"
@@ -762,7 +633,7 @@ class UpdateSubscription(CheckoutMessage):
 
     #: The subscription's token in the gateway.
     token: str
-    #: Only ``SubscriptionStatus.CANCELLED`` is taken; the other states follow the payments.
+    #: Only ``cancelled`` is taken; the other states follow the payments.
     status: SubscriptionStatus | None = None
     period: Period | None = None
     #: 1 to 1000, and never fewer than the renewals already paid.
@@ -773,9 +644,9 @@ class UpdateSubscription(CheckoutMessage):
     def path(self) -> str:
         return f"{self.endpoint}/{self.token}"
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         group = _said({
-            **self._details(self.channel_token),
+            **self._details(),
             "period": _value(self.period),
             "renewal_limit": self.renewal_limit,
             "status": _value(self.status),
@@ -791,16 +662,12 @@ class UpdateSubscription(CheckoutMessage):
 
 
 @dataclass(frozen=True, kw_only=True)
-class CreatePaymentLink(ChannelMessage):
+class CreatePaymentLink(Message):
     """
     A payment link: a page anyone holding it may pay, again and again, until
     it is switched off or its last day has gone by. It has no customer.
-    Opened again under the same reference on the same channel, the link
-    already there is written over and answered with.
-
-    Left without a channel, the link is opened on the client's channel; give
-    ``ODEMEHUB_CHANNEL`` to open it on the team's own ödemehub channel, where
-    the panel opens its links.
+    Opened again under the same reference, the link already there is
+    written over and answered with.
     """
 
     endpoint: ClassVar[str] = "create-payment-link"
@@ -809,11 +676,10 @@ class CreatePaymentLink(ChannelMessage):
     items: Sequence[Item]
     currency: Currency
     #: The reference the link is known by in the calling system. Has to carry
-    #: at least one digit. Left out, the gateway makes one up.
-    channel_reference: str | None = None
+    #: at least one digit. Left out, the gateway gives it one of the form ``LINK{n}``.
+    reference: str | None = None
     description: str | None = None
-    #: The account the link is paid through; it has to take 3D payments. Left
-    #: out, Gate rules and the default account decide at pay time.
+    #: The account the link is paid through; it has to take 3D payments.
     payment_provider_token: str | None = None
     #: The last day the link may be paid, as ``YYYY-MM-DD`` in the team's
     #: timezone; today or later. Left out, it never runs out.
@@ -821,11 +687,10 @@ class CreatePaymentLink(ChannelMessage):
     #: Whether the link takes payments. Left out, it does.
     is_active: bool | None = None
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         return {
             "payment_link": _said({
-                "channel_token": self._link_channel(channel_token),
-                "channel_reference": self.channel_reference,
+                "reference": self.reference,
                 "description": self.description,
                 "payment_provider_token": self.payment_provider_token,
                 "currency": _value(self.currency),
@@ -837,61 +702,12 @@ class CreatePaymentLink(ChannelMessage):
 
 
 @dataclass(frozen=True, kw_only=True)
-class RetrievePaymentLink(RetrieveByToken):
-    """
-    A payment link as it stands, by its token, with how many payments were
-    made on it and the latest fifty of them, newest first, the ones the bank
-    turned away included.
-    """
-
-    endpoint: ClassVar[str] = "retrieve-payment-link"
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrievePaymentLinkByReference(RetrieveByReference):
-    """
-    A payment link by the merchant's own reference for it. With
-    ``ODEMEHUB_CHANNEL`` as the channel, it is looked for among the links on
-    the team's own ödemehub channel.
-    """
-
-    endpoint: ClassVar[str] = "retrieve-payment-link-by-reference"
-
-    def to_body(self, channel_token: str) -> Body:
-        return _said({
-            "channel_token": self._link_channel(channel_token),
-            "channel_reference": self.channel_reference,
-        })
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrievePaymentLinksByChannelReference(RetrieveByChannelReference):
-    """
-    Every payment link opened on a channel within a span of days. With
-    ``ODEMEHUB_CHANNEL`` as the channel, the links on the team's own ödemehub
-    channel are listed.
-    """
-
-    endpoint: ClassVar[str] = "retrieve-payment-links-by-channel-reference"
-
-    def to_body(self, channel_token: str) -> Body:
-        return _said({
-            "channel_token": self._link_channel(channel_token),
-            "created_from": self.created_from,
-            "created_to": self.created_to,
-        })
-
-
-@dataclass(frozen=True, kw_only=True)
-class UpdatePaymentLink(ChannelMessage):
+class UpdatePaymentLink(Message):
     """
     A change to a payment link, named by its token in the address and again
     in the body. Only what is sent is written; lines sent replace the lines
     there were. A link whose last day has gone by is switched on again only
     together with a new day.
-
-    The channel is written only when this message names one;
-    ``ODEMEHUB_CHANNEL`` moves the link to the team's own ödemehub channel.
     """
 
     endpoint: ClassVar[str] = "update-payment-link"
@@ -900,7 +716,7 @@ class UpdatePaymentLink(ChannelMessage):
     token: str
     items: Sequence[Item] | None = None
     currency: Currency | None = None
-    channel_reference: str | None = None
+    reference: str | None = None
     description: str | None = None
     payment_provider_token: str | None = None
     #: As ``YYYY-MM-DD`` in the team's timezone; today or later.
@@ -912,9 +728,9 @@ class UpdatePaymentLink(ChannelMessage):
     def path(self) -> str:
         return f"{self.endpoint}/{self.token}"
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         link = _said({
-            "channel_reference": self.channel_reference,
+            "reference": self.reference,
             "description": self.description,
             "payment_provider_token": self.payment_provider_token,
             "currency": _value(self.currency),
@@ -922,9 +738,6 @@ class UpdatePaymentLink(ChannelMessage):
             "is_active": self.is_active,
             "items": None if self.items is None else [item.to_body() for item in self.items],
         })
-
-        if self.channel_token is not None:
-            link["channel_token"] = self._link_channel(channel_token)
 
         return {
             "token": self.token,
@@ -936,9 +749,11 @@ class UpdatePaymentLink(ChannelMessage):
 
 
 @dataclass(frozen=True, kw_only=True)
-class CreateSavedCard(ChannelMessage):
+class CreateSavedCard(Message):
     """
-    A card kept for a customer without a payment being made on it.
+    A card kept for a customer without a payment being made on it. Once the
+    provider takes it, the team's customer under the reference is written
+    from what was sent and the card is kept for them.
 
     Providers without a card store of their own keep a card by charging a
     small amount and giving it straight back; those ask for the security
@@ -954,45 +769,15 @@ class CreateSavedCard(ChannelMessage):
     #: out, the team's default account is used.
     payment_provider_token: str | None = None
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         card = self.card.to_body()
         card.pop("should_save", None)
 
-        return {
-            "saved_card": _said({
-                "channel_token": self._channel(channel_token),
-                "payment_provider_token": self.payment_provider_token,
-            }),
+        return _said({
+            "saved_card": None if self.payment_provider_token is None else {"payment_provider_token": self.payment_provider_token},
             "customer": self.customer.to_body(),
             "card": card,
-        }
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrieveSavedCard(RetrieveByToken):
-    """One kept card, by its token."""
-
-    endpoint: ClassVar[str] = "retrieve-saved-card"
-
-
-@dataclass(frozen=True, kw_only=True)
-class RetrieveSavedCardsByReference(ChannelMessage):
-    """
-    The cards kept for a customer, named by the two things a card is kept
-    under: the channel and the merchant's own key for the customer there.
-    The default card comes first.
-    """
-
-    endpoint: ClassVar[str] = "retrieve-saved-cards-by-reference"
-
-    #: The key the merchant keeps the customer under.
-    customer_reference: str
-
-    def to_body(self, channel_token: str) -> Body:
-        return {
-            "channel_token": self._channel(channel_token),
-            "customer_reference": self.customer_reference,
-        }
+        })
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1013,7 +798,7 @@ class UpdateSavedCard(Message):
     def path(self) -> str:
         return f"{self.endpoint}/{self.token}"
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         return {
             "token": self.token,
             "saved_card": {"is_default": self.is_default},
@@ -1036,5 +821,5 @@ class DeleteSavedCard(Message):
     def path(self) -> str:
         return f"{self.endpoint}/{self.token}"
 
-    def to_body(self, channel_token: str) -> Body:
+    def to_body(self) -> Body:
         return {"token": self.token}
