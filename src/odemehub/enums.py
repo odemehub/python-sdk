@@ -42,6 +42,52 @@ class OrderStatus(str, Enum):
     PAID = "paid"
 
 
+class LinkPaymentStatus(str, Enum):
+    """
+    Where a payment at a link stands: opened as the payer pays, open while
+    their bank turns them away, and paid once a payment goes through.
+    """
+
+    OPEN = "open"
+    PAID = "paid"
+
+
+class AmountType(str, Enum):
+    """
+    What a payment link lets the payer pay: the lines the merchant wrote,
+    any amount they write themselves, one of the amounts offered, or one of
+    those or an amount of their own.
+    """
+
+    FIXED = "fixed"
+    CUSTOM = "custom"
+    PREDEFINED = "predefined"
+    PREDEFINED_AND_CUSTOM = "predefined_and_custom"
+
+    def is_chosen_by_payer(self) -> bool:
+        """Whether the payer says what they pay, rather than paying the lines the merchant wrote."""
+        return self is not AmountType.FIXED
+
+
+class CurrencyType(str, Enum):
+    """Whether a payment link is paid in the one money it is written in, or the payer picks one of those it offers."""
+
+    FIXED = "fixed"
+    SELECTABLE = "selectable"
+
+
+class TaxMode(str, Enum):
+    """
+    How a payment link whose amount the payer picks reads its tax rate
+    against what they pay: split out of it (100 paid is 83.33 and 16.67 tax
+    at 20%), or added on top of it (100 written is 120 charged). A link of
+    lines keeps the tax inside each line.
+    """
+
+    INCLUSIVE = "inclusive"
+    EXCLUSIVE = "exclusive"
+
+
 class SubscriptionStatus(str, Enum):
     """
     Where a subscription stands. A merchant only ever sends ``CANCELLED``,
@@ -76,7 +122,8 @@ class WebhookEvent(str, Enum):
     """
     What a webhook says happened. The first part is what it is about —
     order, payment_link, subscription, transaction — and the webhook carries
-    that thing's token.
+    that thing's token; a ``payment_link.*`` word carries the payer's payment
+    at the link beside it.
     """
 
     ORDER_PAID = "order.paid"

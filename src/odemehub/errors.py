@@ -32,8 +32,7 @@ class NotFoundError(OdemehubError):
     """
     The record the request names is not there (HTTP 404): no payment,
     order, payment link, subscription or kept card of the team's carries
-    that token, or that reference on that channel. Somebody else's record
-    is answered the same way.
+    that token. Somebody else's record is answered the same way.
     """
 
 

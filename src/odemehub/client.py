@@ -160,9 +160,10 @@ class Client:
 
     def create_order(self, order: request.CreateOrder) -> response.OrderDetails:
         """
-        Open an order to be paid on the gateway's own page, or overwrite the
-        open one already under the same reference. Nothing is charged here;
-        the customer is sent to the address that comes back and pays there.
+        Open an order to be paid on the gateway's own page. Every call opens
+        a new order under a new token, even under a reference sent before;
+        keep the token that comes back. Nothing is charged here; the customer
+        is sent to the address that comes back and pays there.
         """
         return response.OrderDetails.from_body(self._send(order))
 
@@ -178,8 +179,9 @@ class Client:
 
     def create_payment_link(self, link: request.CreatePaymentLink) -> response.PaymentLinkDetails:
         """
-        Open a payment link, or overwrite the one already under the same
-        reference. The address that comes back is the link itself.
+        Open a payment link. Every call opens a new link under a new token,
+        even under a reference sent before; keep the token that comes back.
+        The address that comes back is the link itself.
         """
         return response.PaymentLinkDetails.from_body(self._send(link))
 
@@ -191,17 +193,30 @@ class Client:
         return response.PaymentLinkList.from_body(self._send(links or request.RetrievePaymentLinks()))
 
     def update_payment_link(self, link: request.UpdatePaymentLink) -> response.PaymentLinkDetails:
-        """Change a payment link: its lines, its last day, whether it takes payments. Only what is sent is written."""
+        """
+        Change a payment link: what it charges, its money, its last day,
+        whether it takes payments. Only what is sent is written. A payment
+        under way at it does not stand in the way; the payments to come are
+        charged as it is changed.
+        """
         return response.PaymentLinkDetails.from_body(self._send(link))
+
+    def retrieve_link_payments(self, link_payments: request.RetrieveLinkPayments | None = None) -> response.LinkPaymentList:
+        """
+        Payments at the team's links as they stand — what was paid, by
+        whom, at which link, and the attempt that paid it. They are opened
+        by the payers, so they are only ever asked after.
+        """
+        return response.LinkPaymentList.from_body(self._send(link_payments or request.RetrieveLinkPayments()))
 
     # Subscriptions ---------------------------------------------------------
 
     def create_subscription(self, subscription: request.CreateSubscription) -> response.SubscriptionDetails:
         """
         Open a subscription, its first renewal to be paid on the gateway's
-        own page and the rest taken from the card kept then; or overwrite
-        the one already under the same reference while nothing has been
-        paid on it.
+        own page and the rest taken from the card kept then. Every call opens
+        a new subscription under a new token, even under a reference sent
+        before; keep the token that comes back.
         """
         return response.SubscriptionDetails.from_body(self._send(subscription))
 

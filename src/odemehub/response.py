@@ -12,15 +12,19 @@ from enum import Enum
 from typing import Any, TypeVar
 
 from .enums import (
+    AmountType,
     CardScheme,
     CardType,
     Currency,
+    CurrencyType,
+    LinkPaymentStatus,
     OrderStatus,
     PaymentStatus,
     Period,
     RefundType,
     SecurityType,
     SubscriptionStatus,
+    TaxMode,
     TransactionStatus,
     WebhookEvent,
     known,
@@ -139,6 +143,27 @@ class Conversion:
             amount=_string(conversion.get("amount")),
             currency=_known(Currency, conversion.get("currency")),
             rate=_string(conversion.get("rate")),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class Discount:
+    """
+    The coupon the payer put on an order, a subscription or a payment at a
+    link, on the checkout page: the code they typed and what it took off the
+    lines. Coupons are never sent through the gateway; they are only told of.
+    """
+
+    #: The code the payer typed.
+    code: str
+    #: What it took off the lines, in the record's money, with the kurus behind a point.
+    amount: str
+
+    @classmethod
+    def from_body(cls, discount: Body) -> Discount:
+        return cls(
+            code=_string(discount.get("code")),
+            amount=_string(discount.get("amount")),
         )
 
 
@@ -336,6 +361,8 @@ class PaymentTransaction:
     order_token: str | None = None
     #: The payment link the payment was made on, when it was made on one.
     payment_link_token: str | None = None
+    #: The payer's payment at the link, beside ``payment_link_token``.
+    link_payment_token: str | None = None
     #: The subscription whose renewal the payment paid, when it paid one.
     subscription_token: str | None = None
 
@@ -359,6 +386,7 @@ class PaymentTransaction:
             created_at=_said(transaction.get("created_at")),
             order_token=_said(_object(transaction.get("order")).get("token")),
             payment_link_token=_said(_object(transaction.get("payment_link")).get("token")),
+            link_payment_token=_said(_object(transaction.get("link_payment")).get("token")),
             subscription_token=_said(_object(transaction.get("subscription")).get("token")),
         )
 
@@ -490,7 +518,7 @@ class Webhook:
 
     It is a notification, never the answer. It names the thing by token —
     and the payment beside it when money moved — and nothing else; ask the
-    gateway what became of it (``retrieve_orders``, ``retrieve_payment_links``,
+    gateway what became of it (``retrieve_orders``, ``retrieve_link_payments``,
     ``retrieve_subscriptions``, ``retrieve_payments``, by its token) and act
     on that. A word may arrive more than once; the id tells the copies apart.
     """
@@ -503,6 +531,8 @@ class Webhook:
     order_token: str | None
     #: The payment link, for the ``payment_link.*`` events.
     payment_link_token: str | None
+    #: The payer's payment at the link, beside it in the ``payment_link.*`` events.
+    link_payment_token: str | None
     #: The subscription, for the ``subscription.*`` events.
     subscription_token: str | None
     #: The payment: for the ``transaction.*`` events, and beside the thing wherever money moved at it.
@@ -516,6 +546,7 @@ class Webhook:
             created_at=_said(body.get("created_at")),
             order_token=_said(_object(body.get("order")).get("token")),
             payment_link_token=_said(_object(body.get("payment_link")).get("token")),
+            link_payment_token=_said(_object(body.get("link_payment")).get("token")),
             subscription_token=_said(_object(body.get("subscription")).get("token")),
             transaction_token=_said(_object(body.get("transaction")).get("token")),
         )
@@ -562,6 +593,8 @@ class Transaction:
     order_token: str | None
     #: The token of the payment link this attempt was at, when it was at one.
     payment_link_token: str | None
+    #: The token of the payer's payment at the link, beside ``payment_link_token``.
+    link_payment_token: str | None
     #: The token of the subscription this attempt paid a renewal of, when it did.
     subscription_token: str | None
     #: The card the payment kept, when it asked to keep one and went through; None otherwise.
@@ -601,6 +634,7 @@ class Transaction:
             conversion=Conversion.from_body(conversion) if isinstance(conversion, dict) else None,
             order_token=_said(_object(transaction.get("order")).get("token")),
             payment_link_token=_said(_object(transaction.get("payment_link")).get("token")),
+            link_payment_token=_said(_object(transaction.get("link_payment")).get("token")),
             subscription_token=_said(_object(transaction.get("subscription")).get("token")),
             saved_card=SavedCard.from_body(transaction["saved_card"]) if isinstance(transaction.get("saved_card"), dict) else None,
         )
@@ -700,12 +734,12 @@ class Bin:
 
 @dataclass(frozen=True, kw_only=True)
 class Item:
-    """One line of what an order, a subscription or a payment link is for, as it was written down."""
+    """One line of what an order, a subscription, a payment link or a payment at one is for, as it was written down."""
 
     #: The merchant's own key for what is on the line, if it gave one.
     reference: str | None
     name: str
-    #: The picture the line is shown with, if any.
+    #: The picture the line is shown with, if any; never said of a payment at a link.
     image: str | None
     quantity: int
     #: The price of one, tax included, as digits with the kurus behind a point.
@@ -768,15 +802,18 @@ class Order:
     items: list[Item]
     #: The way the payer picked; None until they have.
     shipping_method: ShippingMethod | None
-    #: What the lines come to before tax.
+    #: What the lines come to before tax, less any coupon.
     subtotal: str
-    #: What the picked shipping method costs before tax.
+    #: What the picked shipping method costs before tax; a coupon never takes anything off it.
     shipping_amount: str
     #: The tax on the lines and the shipping together.
     tax_amount: str
     #: What the order comes to in all, which is what the card is charged.
     amount: str
     currency: Currency | str
+    #: The coupon the payer put on it at checkout; None while there is none.
+    #: The amounts above already have it taken off.
+    discount: Discount | None
     #: Whether it was paid in the test environment; None until it is paid.
     is_test: bool | None
     created_at: str | None
@@ -794,6 +831,7 @@ class Order:
     @classmethod
     def from_body(cls, order: Body) -> Order:
         shipping_method = order.get("shipping_method")
+        discount = order.get("discount")
         transaction = order.get("transaction")
         customer = order.get("customer")
 
@@ -810,6 +848,7 @@ class Order:
             tax_amount=_string(order.get("tax_amount")),
             amount=_string(order.get("amount")),
             currency=_known(Currency, order.get("currency")),
+            discount=Discount.from_body(discount) if isinstance(discount, dict) else None,
             is_test=_optional_boolean(order.get("is_test")),
             created_at=_said(order.get("created_at")),
             checkout_url=_said(order.get("checkout_url")),
@@ -872,8 +911,11 @@ class OrderList:
 @dataclass(frozen=True, kw_only=True)
 class PaymentLink:
     """
-    A payment link as it stands: what it sells, what it comes to now,
-    whether it takes payments and until when, and the address it is paid at.
+    A payment link as it stands: what it sells — its lines and what they
+    come to now, or what the payer may pick and the tax on it — in which
+    money, whether it takes payments and until when, and the address it is
+    paid at. Who paid it, and what, is asked after with
+    ``retrieve_link_payments()``.
     """
 
     #: The link's token in the gateway; name it to ask after or change it later.
@@ -883,14 +925,33 @@ class PaymentLink:
     description: str | None
     #: The account the link is paid through; None when none was named.
     payment_provider_token: str | None
+    #: What the payer pays: the lines, or an amount they pick.
+    amount_type: AmountType | str
+    #: The name of the one line a payer-picked amount is paid as; None for a link of lines.
+    item_name: str | None
+    #: The amounts the payer may pick from; None where none are offered.
+    predefined_amounts: list[str] | None
+    #: The tax on a payer-picked amount, as a percentage; None when it carries none.
+    tax_rate: str | None
+    #: Whether ``tax_rate`` is inside the amount paid or added on top of it.
+    tax_mode: TaxMode | str
+    #: The lines of a link of lines; empty where the payer picks the amount.
     items: list[Item]
-    #: What the lines come to before tax.
-    subtotal: str
-    #: The tax on the lines.
-    tax_amount: str
-    #: What the link comes to in all, which is what each payment charges.
-    amount: str
+    #: What the lines come to before tax; None where the payer picks the amount.
+    subtotal: str | None
+    #: The tax on the lines; None where the payer picks the amount.
+    tax_amount: str | None
+    #: What the link comes to in all, which is what each payment charges;
+    #: None where the payer picks the amount.
+    amount: str | None
     currency: Currency | str
+    #: Whether the payer may pick the money.
+    currency_type: CurrencyType | str
+    #: The money the payer may pick from, ``currency`` among them; None when
+    #: the link is paid in ``currency`` alone.
+    currencies: list[Currency | str] | None
+    #: Whether the payer is sent an e-mail once their payment goes through.
+    emails_payer: bool
     #: Whether the link takes payments right now: switched on and not past its last day.
     is_active: bool
     #: Whether its payments are taken in the test environment now.
@@ -919,11 +980,19 @@ class PaymentLink:
             reference=_string(link.get("reference")),
             description=_said(link.get("description")),
             payment_provider_token=_said(link.get("payment_provider_token")),
+            amount_type=_known(AmountType, link.get("amount_type")),
+            item_name=_said(link.get("item_name")),
+            predefined_amounts=None if link.get("predefined_amounts") is None else [_string(amount) for amount in _list(link.get("predefined_amounts"))],
+            tax_rate=_said(link.get("tax_rate")),
+            tax_mode=_known(TaxMode, link.get("tax_mode")),
             items=[Item.from_body(_object(item)) for item in _list(link.get("items"))],
-            subtotal=_string(link.get("subtotal")),
-            tax_amount=_string(link.get("tax_amount")),
-            amount=_string(link.get("amount")),
+            subtotal=_optional_string(link.get("subtotal")),
+            tax_amount=_optional_string(link.get("tax_amount")),
+            amount=_optional_string(link.get("amount")),
             currency=_known(Currency, link.get("currency")),
+            currency_type=_known(CurrencyType, link.get("currency_type")),
+            currencies=None if link.get("currencies") is None else [_known(Currency, currency) for currency in _list(link.get("currencies"))],
+            emails_payer=_boolean(link.get("emails_payer")),
             is_active=_boolean(link.get("is_active")),
             is_test=_boolean(link.get("is_test")),
             expires_at=_said(link.get("expires_at")),
@@ -978,6 +1047,138 @@ class PaymentLinkList:
             created_from=_said(body.get("created_from")),
             created_to=_said(body.get("created_to")),
             payment_links=[PaymentLink.from_body(_object(entry)) for entry in _list(body.get("payment_links"))],
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class PaymentLinkReference:
+    """A payment link named, and nothing more: its token in the gateway and the reference it is known by."""
+
+    #: The link's token in the gateway.
+    token: str
+    #: The reference the link is known by: the merchant's, or one the gateway made up.
+    reference: str
+
+    @classmethod
+    def from_body(cls, link: Body) -> PaymentLinkReference:
+        return cls(
+            token=_string(link.get("token")),
+            reference=_string(link.get("reference")),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class LinkPaymentCustomer:
+    """
+    Who paid at a link, as they billed themselves on the checkout page. A
+    link has no customer of its own, so there is no reference: the payer is
+    nobody the team keeps.
+    """
+
+    billing_address: Address
+
+    @classmethod
+    def from_body(cls, customer: Body) -> LinkPaymentCustomer:
+        return cls(billing_address=Address.from_body(_object(customer.get("billing_address"))))
+
+
+@dataclass(frozen=True, kw_only=True)
+class LinkPayment:
+    """
+    A payment at a payment link, opened by the payer as they pay there: what
+    was paid and the tax in it, where it stands, the link it was made at,
+    the payer as they billed themselves and — once it is paid — the attempt
+    that paid it, which is what is given back out of or asked after.
+    """
+
+    #: The payment's token in the gateway; name it to ask after it later.
+    token: str
+    #: The reference the gateway gave it: ``LINKPAY{n}``.
+    reference: str
+    #: The link it was made at.
+    payment_link: PaymentLinkReference
+    #: The account it was paid through; None while none has been picked.
+    payment_provider_token: str | None
+    #: Where it stands: open until a payment goes through, then paid.
+    status: LinkPaymentStatus | str
+    #: What was paid for: the link's lines, or the one line of the amount the payer picked.
+    items: list[Item]
+    #: What the lines come to before tax, less any coupon.
+    subtotal: str
+    #: The tax on the lines.
+    tax_amount: str
+    #: What it comes to in all, which is what the card is charged.
+    amount: str
+    #: The coupon the payer put on it at checkout; None while there is none.
+    #: The amounts above already have it taken off.
+    discount: Discount | None
+    #: The money it was paid in: the link's, or the one the payer picked.
+    currency: Currency | str
+    #: Who paid, as they billed themselves; None while they have not said.
+    customer: LinkPaymentCustomer | None
+    #: Whether it was made in the test environment.
+    is_test: bool
+    created_at: str | None
+    #: The payment that paid it, which names it again for a refund; None while it is open.
+    transaction: TransactionReference | None
+
+    def is_paid(self) -> bool:
+        """Whether a payment went through at it."""
+        return self.status == LinkPaymentStatus.PAID
+
+    @classmethod
+    def from_body(cls, link_payment: Body) -> LinkPayment:
+        discount = link_payment.get("discount")
+        customer = link_payment.get("customer")
+        transaction = link_payment.get("transaction")
+
+        return cls(
+            token=_string(link_payment.get("token")),
+            reference=_string(link_payment.get("reference")),
+            payment_link=PaymentLinkReference.from_body(_object(link_payment.get("payment_link"))),
+            payment_provider_token=_said(link_payment.get("payment_provider_token")),
+            status=_known(LinkPaymentStatus, link_payment.get("status")),
+            items=[Item.from_body(_object(item)) for item in _list(link_payment.get("items"))],
+            subtotal=_string(link_payment.get("subtotal")),
+            tax_amount=_string(link_payment.get("tax_amount")),
+            amount=_string(link_payment.get("amount")),
+            discount=Discount.from_body(discount) if isinstance(discount, dict) else None,
+            currency=_known(Currency, link_payment.get("currency")),
+            customer=LinkPaymentCustomer.from_body(customer) if isinstance(customer, dict) else None,
+            is_test=_boolean(link_payment.get("is_test")),
+            created_at=_said(link_payment.get("created_at")),
+            transaction=TransactionReference.from_body(transaction) if isinstance(transaction, dict) else None,
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class LinkPaymentList:
+    """
+    Payments at the team's links asked after. The answer is always a list,
+    oldest first, and an empty one when nothing matched. The days are the
+    ones the gateway used, when the records were asked for by the days they
+    were made on: the ones asked for, or the last seven when none were.
+    """
+
+    result: Result
+    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone; None
+    #: when they were asked for by token or reference.
+    created_from: str | None
+    #: The last day listed, the same way.
+    created_to: str | None
+    link_payments: list[LinkPayment]
+
+    def paid(self) -> list[LinkPayment]:
+        """The payments that went through."""
+        return [link_payment for link_payment in self.link_payments if link_payment.is_paid()]
+
+    @classmethod
+    def from_body(cls, body: Body) -> LinkPaymentList:
+        return cls(
+            result=Result.from_body(body),
+            created_from=_said(body.get("created_from")),
+            created_to=_said(body.get("created_to")),
+            link_payments=[LinkPayment.from_body(_object(entry)) for entry in _list(body.get("link_payments"))],
         )
 
 
@@ -1045,6 +1246,10 @@ class Subscription:
     #: What a renewal comes to in all, as the lines are priced today.
     amount: str
     currency: Currency | str
+    #: The coupon the payer put on the first payment, the only one that
+    #: takes a coupon; None while there is none. The amounts above are
+    #: without it: what the first payment was charged is its renewal's amount.
+    discount: Discount | None
     #: Whether it is paid for in the test environment; None until the first payment.
     is_test: bool | None
     #: The renewal it is on: the latest one.
@@ -1093,6 +1298,7 @@ class Subscription:
     @classmethod
     def from_body(cls, subscription: Body) -> Subscription:
         shipping_method = subscription.get("shipping_method")
+        discount = subscription.get("discount")
         customer = subscription.get("customer")
 
         return cls(
@@ -1111,6 +1317,7 @@ class Subscription:
             tax_amount=_string(subscription.get("tax_amount")),
             amount=_string(subscription.get("amount")),
             currency=_known(Currency, subscription.get("currency")),
+            discount=Discount.from_body(discount) if isinstance(discount, dict) else None,
             is_test=_optional_boolean(subscription.get("is_test")),
             renewal=Renewal.from_body(_object(subscription.get("renewal"))),
             next_payment_at=_said(subscription.get("next_payment_at")),

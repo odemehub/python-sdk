@@ -31,7 +31,7 @@ client = Client(Options(
 
 Gizli anahtar hiçbir zaman tel üzerinden gitmez; yalnızca imza üretmekte ve doğrulamakta kullanılır. Anahtarları kodun içine yazmayın, ortam değişkeninde tutun.
 
-Geçit hiçbir yerde veritabanı numarası kullanmaz: ödeme hesabı, işlem, sipariş, abonelik, link ve kayıtlı kart her zaman token'ıyla anılır.
+Geçit hiçbir yerde veritabanı numarası kullanmaz: ödeme hesabı, işlem, sipariş, abonelik, link, link ödemesi ve kayıtlı kart her zaman token'ıyla anılır. `reference` sizin kendi numaranızdır ve tekil değildir; bir kaydı her zaman token'ı adlandırır.
 
 İstek bir dakika içinde yanıt almazsa kesilir; süreyi `Options(timeout=...)` (saniye) ile değiştirebilirsiniz. İstekler standart kütüphanenin `urllib`'iyle gider; `requests` ya da `httpx` kullanmak isterseniz `send(method, url, headers, body, timeout)` metodu olan bir nesneyi `Client(options, transport=...)` ile verebilirsiniz. Bütün istekler JSON gövdeli POST'tur.
 
@@ -39,7 +39,7 @@ Geçit hiçbir yerde veritabanı numarası kullanmaz: ödeme hesabı, işlem, si
 
 ## Sabit değerler
 
-Para birimi, dönem, durumlar, kart şeması ve tipi gibi sabit kümeler `odemehub.enums` modülündedir ve `str` tabanlı `Enum`'dur: `Currency`, `Period`, `OrderStatus`, `SubscriptionStatus`, `TransactionStatus`, `PaymentStatus`, `SecurityType`, `RefundType`, `RefundStatus`, `CardScheme`, `CardType`, `WebhookEvent`. Bir üye geçidin gönderdiği metnin kendisidir ve ona eşittir (`TransactionStatus.SUCCESSFUL == "successful"`).
+Para birimi, dönem, durumlar, kart şeması ve tipi gibi sabit kümeler `odemehub.enums` modülündedir ve `str` tabanlı `Enum`'dur: `Currency`, `Period`, `OrderStatus`, `SubscriptionStatus`, `LinkPaymentStatus`, `TransactionStatus`, `PaymentStatus`, `SecurityType`, `RefundType`, `RefundStatus`, `CardScheme`, `CardType`, `WebhookEvent`, `AmountType`, `CurrencyType`, `TaxMode`. Bir üye geçidin gönderdiği metnin kendisidir ve ona eşittir (`TransactionStatus.SUCCESSFUL == "successful"`).
 
 İsteklerde bu alanlar üyeyle verilir (`currency=Currency.USD`, `period=Period.MONTHLY`). Yanıtlarda okunan değer üyeye çevrilir; geçit bu sürümün bilmediği yeni bir değer gönderirse SDK çökmez, değer geldiği gibi düz metin olarak kalır.
 
@@ -171,7 +171,9 @@ answer.order.amount            # geçidin hesapladığı toplam
 
 Müşteri istediğiniz kadarıyla verilir: yalnız `reference`, fatura adresi (`billing_address`), gönderim adresi (`shipping_address`) ya da hiçbiri. Verilmeyenler ödeme sayfasında sorulur. Referans verilmezse ödeyen müşteri listenize yazılmaz. `save_as_product=True` olan kalem referansıyla ürün listenize yazılır (referans zorunlu). Gönderim yöntemleri istekte gönderilmez: panelinizdeki **Gönderim Yöntemleri** listesinden ödeyenin adresine uyanlar sunulur.
 
-Yanıttaki `order` siparişi bütünüyle taşır (müşteri hem `answer.customer`'da hem `answer.order.customer`'dadır): `token`, `reference`, `description`, `payment_provider_token`, `status` (`open` / `paid`), `items`, seçilen `shipping_method`, `subtotal`, `shipping_amount`, `tax_amount`, `amount`, `currency`, `is_test`, `created_at`, `checkout_url` (ödenince `None`), ödeyen işlem `transaction` (açıkken `None`) ve `customer`.
+Yanıttaki `order` siparişi bütünüyle taşır (müşteri hem `answer.customer`'da hem `answer.order.customer`'dadır): `token`, `reference`, `description`, `payment_provider_token`, `status` (`open` / `paid`), `items`, seçilen `shipping_method`, `subtotal`, `shipping_amount`, `tax_amount`, `amount`, `currency`, `discount`, `is_test`, `created_at`, `checkout_url` (ödenince `None`), ödeyen işlem `transaction` (açıkken `None`) ve `customer`.
+
+**Kupon.** API'de kupon alanı yoktur; ödeyen kodu ödeme sayfasında girer. Kupon kullanıldıysa yanıtta `discount` (`Discount`: `code`, `amount`) gelir, yoksa `None`'dır. Siparişin `subtotal`, `tax_amount` ve `amount` değerleri indirim düşülmüş hâlidir; kupon gönderim ücretinden düşülmez.
 
 Ödendiğinde müşteri `success_url` adresinize 3D dönüşüyle aynı alanlarla POST edilir; `retrieve_orders()` kesin sonucu verir.
 
@@ -189,7 +191,7 @@ client.update_order(UpdateOrder(token=token, description="Hediye paketi", clear=
 
 Bir alanı vermemek onu olduğu gibi bırakır; boşaltmak için adını `clear` listesine yazın.
 
-`create_*` çağrıları aynı referans için tekrarlanabilir: aynı referansla ikinci kez açılan sipariş, link ya da (henüz ödenmemiş) abonelik yeni gönderilenlerle güncellenir ve kendi token'ıyla döner. Ödenmiş sipariş değişmez. Ödeme sayfasında son 15 dakika içinde başlamış bir ödeme varken `create_*` ve `update_*` çağrıları `reference` / `token` alanında reddedilir.
+`create_*` her çağrıda yeni bir kayıt ve yeni bir token açar; aynı `reference` daha önce gönderilmiş olsa da eski kayıt değişmez ve istek reddedilmez. Bu yüzden her `create_*` yanıtındaki token'ı saklayın: kaydı sorgularken ve değiştirirken onu kullanırsınız. Var olan kayıt `update_*` ile değişir. Ödenmiş sipariş değişmez. Ödeme sayfasında son 15 dakika içinde başlamış bir ödeme varken `update_order` ve `update_subscription` `token` alanında reddedilir; link güncellemesini bekleyen ödeme engellemez.
 
 ## Ödeme linki
 
@@ -200,25 +202,79 @@ from odemehub.enums import Currency
 from odemehub.request import CreatePaymentLink, Item, RetrievePaymentLinks, UpdatePaymentLink
 
 answer = client.create_payment_link(CreatePaymentLink(
-    items=[Item(name="Bağış", unit_amount="100.00", quantity=1, tax_rate="0")],
+    items=[Item(name="Kulaklık", unit_amount="1200.00", quantity=1, tax_rate="20")],
     currency=Currency.TRY,
-    reference="LNK-1",                  # boş bırakılırsa geçit üretir
+    reference="LNK-1",                  # boş bırakılırsa geçit LINK{n} üretir; tekil değildir
     expires_at="2026-12-31",            # çalışma alanının saat dilimine göre son gün
+    emails_payer=True,                  # ödeme tamamlanınca ödeyene e-posta gider
 ))
 
 link = answer.payment_link
+link.token                              # saklayın: link bununla sorulur ve değiştirilir
 link.checkout_url                       # linkin kendisi; ödenemezken None
 link.expires_at                         # son an, UTC ISO 8601
 
 detail = client.retrieve_payment_links(RetrievePaymentLinks(token=link.token)).payment_links[0]
-detail.transactions_count               # linkteki bütün ödemeler
-detail.transactions                     # son 50 ödeme, yeniden eskiye
+detail.transactions_count               # linkteki bütün ödeme denemeleri
+detail.transactions                     # son 50 deneme, yeniden eskiye
 detail.successful()                     # bunlardan başarılı olanlar
 
 client.update_payment_link(UpdatePaymentLink(token=link.token, is_active=False))
 ```
 
-`is_active` linkin şu an ödeme alıp almadığını (açık ve süresi dolmamış), `is_test` ödemelerinin test ortamında alındığını söyler. Panelden açtığınız linkler de aynı uçlarla bulunur. Linkle ödeyen kişi müşteri listenize yazılmaz ve kartı saklanmaz. 50'den eski ödemeler `retrieve_payments()` ile tarih aralığıyla okunur.
+`is_active` linkin şu an ödeme alıp almadığını (açık ve süresi dolmamış), `is_test` ödemelerinin test ortamında alındığını söyler. Panelden açtığınız linkler de aynı uçlarla bulunur. Linkle ödeyen kişi müşteri listenize yazılmaz ve kartı saklanmaz. Süresi geçmiş link yalnızca yeni bir `expires_at` ile yeniden açılır.
+
+**Tutar tipleri.** `amount_type` (`AmountType`) linkin neyi tahsil ettiğini söyler:
+
+| Tip | Ödeyen ne öder |
+| --- | --- |
+| `FIXED` (varsayılan) | Kalemlerin toplamını; `items` zorunlu |
+| `CUSTOM` | Kendi yazdığı tutarı |
+| `PREDEFINED` | `predefined_amounts` içinden seçtiğini (en çok 10) |
+| `PREDEFINED_AND_CUSTOM` | Hazır tutarlardan birini ya da kendi yazdığını |
+
+Ödeyenin seçtiği tiplerde `items` gönderilmez (gönderilirse yok sayılır), `item_name` zorunludur: ödeme bu adla tek kalem olarak yazılır. `tax_rate` bu tutara uygulanır; `tax_mode` (`TaxMode`) vergi tutarın içinde mi (`INCLUSIVE`, varsayılan) yoksa üstüne mi eklenecek (`EXCLUSIVE`) söyler. Bu tiplerde yanıttaki `subtotal`, `tax_amount` ve `amount` `None`'dır; ödenen tutar link ödemesindedir.
+
+**Para birimi seçimi.** `currency_type=CurrencyType.SELECTABLE` ile ödeyen para birimini seçer; `currencies` ödeyenin `currency` dışında seçebileceklerini verir. Yanıttaki `currencies` `currency` dahil listedir, `FIXED`'de `None`'dır.
+
+```python
+from odemehub.enums import AmountType, Currency, CurrencyType
+
+answer = client.create_payment_link(CreatePaymentLink(
+    amount_type=AmountType.PREDEFINED_AND_CUSTOM,
+    item_name="Bağış",
+    predefined_amounts=["100.00", "250.00", "500.00"],
+    tax_rate="0",
+    currency=Currency.TRY,
+    currency_type=CurrencyType.SELECTABLE,
+    currencies=[Currency.USD, Currency.EUR],
+))
+
+answer.payment_link.amount              # None: tutarı ödeyen seçer
+```
+
+Güncellemede `clear` listesi `description`, `payment_provider_token`, `expires_at`, `item_name`, `predefined_amounts`, `tax_rate` ve `currencies` alanlarını boşaltabilir. Ödeyenin seçtiği tipten `FIXED`'e dönen link kalem göndermek zorundadır.
+
+**Link ödemeleri.** Linkte kimin ne ödediği `retrieve_link_payments()` ile okunur. Her ödeme yapıldığında geçit bir link ödemesi (`LinkPayment`) açar; referansı geçidin verdiği `LINKPAY{n}`'dir.
+
+```python
+from odemehub.request import RetrieveLinkPayments
+
+payments = client.retrieve_link_payments(RetrieveLinkPayments(created_from="2026-09-26", created_to="2026-10-02"))
+
+for link_payment in payments.link_payments:
+    link_payment.payment_link.token     # hangi link
+    link_payment.status                 # LinkPaymentStatus.OPEN ya da PAID
+    link_payment.amount                 # ödenen tutar, indirim düşülmüş
+    link_payment.currency               # ödenen para birimi
+    link_payment.discount               # ödeyen kupon girdiyse Discount, yoksa None
+    link_payment.customer.billing_address if link_payment.customer else None
+    link_payment.transaction.token if link_payment.transaction else None   # iade ve iptal bununla
+
+payments.paid()                         # ödenmiş olanlar
+```
+
+`LinkPayment` alanları: `token`, `reference`, `payment_link` (`token`, `reference`), `payment_provider_token`, `status`, `items` (görselsiz), `subtotal`, `tax_amount`, `amount`, `discount`, `currency`, `customer` (yalnız `billing_address`; yoksa `None`), `is_test`, `created_at` ve ödeyen işlem `transaction` (`token`, `reference`, `payment_status`; açıkken `None`).
 
 ## Abonelik
 
@@ -250,6 +306,8 @@ client.update_subscription(UpdateSubscription(token=token, status=SubscriptionSt
 ```
 
 İlk ödeme alındıktan sonra yalnızca iptal (`status`), ödeme sayısı (`renewal_limit`), dönem (`period`) ve aynı kalemlerin birim fiyatı değişebilir; müşteri dahil başka bir alan gönderilirse geçit `ValidationError` ile reddeder. İptalde para iade edilmez; ödenmiş dönem sonuna kadar sürer, sonra abonelik biter. Ödenmiş dönem yoksa hemen `cancelled` olur.
+
+Ödeyen ilk ödemede kupon girdiyse `subscription.discount` (`code`, `amount`) dolu gelir; kupon yalnızca ilk ödemeye uygulanır. Aboneliğin kendi `subtotal`, `tax_amount` ve `amount` değerleri indirimsizdir; ilk ödemede çekilen tutar o yenilemenin `renewal.amount` değeridir.
 
 ## Kayıtlı kartlar
 
@@ -321,11 +379,12 @@ for transaction in payments.payments:
     transaction.is_finished()           # SUCCESSFUL, FAILED ya da EXPIRED
     transaction.payment_status          # PaymentStatus: PAID, REFUNDED, PARTIALLY_REFUNDED...
     transaction.order_token             # ödeme sayfasından geldiyse sipariş, link ya da abonelik token'ı
+    transaction.link_payment_token      # linkte alınan ödemede payment_link_token ile birlikte link ödemesinin token'ı
 
 client.retrieve_payments()              # son 7 gün
 ```
 
-Aynısı `retrieve_orders()` (`RetrieveOrders`), `retrieve_subscriptions()` (`RetrieveSubscriptions`), `retrieve_payment_links()` (`RetrievePaymentLinks`) ve `retrieve_saved_cards()` (`RetrieveSavedCards`; `reference` müşterinin referansıdır) için de geçerlidir. Sipariş ve abonelik listelerinde her kayıt kendi `customer` bilgisini taşır.
+Aynısı `retrieve_orders()` (`RetrieveOrders`), `retrieve_subscriptions()` (`RetrieveSubscriptions`), `retrieve_payment_links()` (`RetrievePaymentLinks`), `retrieve_link_payments()` (`RetrieveLinkPayments`; `reference` geçidin verdiği `LINKPAY{n}`'dir) ve `retrieve_saved_cards()` (`RetrieveSavedCards`; `reference` müşterinin referansıdır) için de geçerlidir. Sipariş ve abonelik listelerinde her kayıt kendi `customer` bilgisini taşır.
 
 ## Webhook
 
@@ -340,11 +399,11 @@ Sipariş ödendiğinde, link ödemesi alındığında, abonelik durum değiştir
 
 Sipariş, link ya da abonelikte alınan ödeme için `transaction.*` gelmez; o kaynağın kendi olayı gelir.
 
-**Webhook nihai sonuç değildir.** Gövde yalnızca kaynağın token'ını (para hareketi varsa yanında ödemenin token'ını) taşır. Kararı, token ile geçide sorduğunuz yanıta göre verin ve yanıtı kendi kaydınızla (referans, tutar, durum) karşılaştırın. Gövdeyi **ham** okuyun; ayrıştırıp yeniden yazarsanız imza tutmaz.
+**Webhook nihai sonuç değildir.** Gövde yalnızca kaynağın token'ını (para hareketi varsa yanında ödemenin token'ını; `payment_link.*` olaylarında ayrıca link ödemesinin token'ını) taşır; `discount` gibi ayrıntılar gövdede yoktur. Kararı, token ile geçide sorduğunuz yanıta göre verin ve yanıtı kendi kaydınızla (referans, tutar, durum) karşılaştırın. Gövdeyi **ham** okuyun; ayrıştırıp yeniden yazarsanız imza tutmaz.
 
 ```python
 from odemehub import SignatureError
-from odemehub.request import RetrieveOrders, RetrievePayments, RetrieveSubscriptions
+from odemehub.request import RetrieveLinkPayments, RetrieveOrders, RetrievePayments, RetrieveSubscriptions
 
 @app.post("/odemehub/webhook")
 def webhook():
@@ -366,16 +425,20 @@ def webhook():
         order = client.retrieve_orders(RetrieveOrders(token=webhook.order_token)).orders[0]
         order.status                          # OrderStatus.PAID
         order.transaction.payment_status      # PaymentStatus.REFUNDED ...
+    elif webhook.link_payment_token is not None:  # payment_link.*
+        link_payment = client.retrieve_link_payments(RetrieveLinkPayments(token=webhook.link_payment_token)).link_payments[0]
+        link_payment.payment_link.token       # webhook.payment_link_token ile aynı
+        link_payment.status                   # LinkPaymentStatus.PAID
+        link_payment.transaction.payment_status if link_payment.transaction else None   # PaymentStatus.REFUNDED ...
     elif webhook.subscription_token is not None:
         subscription = client.retrieve_subscriptions(RetrieveSubscriptions(token=webhook.subscription_token)).subscriptions[0]
-    elif webhook.transaction_token is not None:   # transaction.* ve payment_link.*
+    elif webhook.transaction_token is not None:   # transaction.*
         transaction = client.retrieve_payments(RetrievePayments(token=webhook.transaction_token)).payments[0]
-        transaction.payment_link_token        # linkte alınan ödemede linkin token'ı
 
     return "", 204
 ```
 
-Abonelik ve link ödemelerinin iade/iptal olaylarında `transaction_token` da gelir; `retrieve_payments()` yanıtındaki `order_token` / `payment_link_token` / `subscription_token` ödemenin gerçekten o kaynağa ait olduğunu gösterir. Yalnızca doğrulamak için `client.verify_webhook(...)` `bool` döner. Geçit 2xx yanıt alana kadar 60 sn, 5 dk, 15 dk ve 30 dk arayla toplam 5 kez dener; yönlendirmeleri izlemez.
+Sipariş, abonelik ve link olaylarında para hareketi varsa `transaction_token` da gelir; `retrieve_payments()` yanıtındaki `order_token` / `payment_link_token` / `link_payment_token` / `subscription_token` ödemenin gerçekten o kaynağa ait olduğunu gösterir. Yalnızca doğrulamak için `client.verify_webhook(...)` `bool` döner. Geçit 2xx yanıt alana kadar 60 sn, 5 dk, 15 dk ve 30 dk arayla toplam 5 kez dener; yönlendirmeleri izlemez.
 
 ## Hatalar
 
@@ -416,6 +479,22 @@ Sınırlar çalışma alanı başına ve dakikalıktır:
 
 Aşıldığında 429 ve `RateLimitError` döner; `retry_after` kadar bekleyip aynı isteği yeniden gönderin.
 
+## 1.0.2'deki değişiklikler
+
+1.0.2, SDK'yı geçidin bugünkü API'sine taşır. Eklenenler:
+
+- **Link ödemeleri:** yeni `retrieve_link_payments()` (`RetrieveLinkPayments`: `token`, `reference` ya da `created_from`/`created_to`), yanıt modelleri `LinkPayment` / `LinkPaymentList` ve `LinkPaymentStatus` (`OPEN`, `PAID`). `PaymentTransaction`, `Transaction` ve `Webhook` linkte alınan ödemede `payment_link_token`'ın yanında `link_payment_token` taşır.
+- **Ödeme linki tutar ve para birimi:** `CreatePaymentLink` ve `UpdatePaymentLink` yeni `amount_type` (`AmountType`), `item_name`, `predefined_amounts`, `tax_rate`, `tax_mode` (`TaxMode`), `currency_type` (`CurrencyType`), `currencies` ve `emails_payer` alanlarını alır; `PaymentLink` yanıtı da bu sekiz alanı taşır. Güncellemenin `clear` listesi `item_name`, `predefined_amounts`, `tax_rate` ve `currencies` alanlarını da boşaltır.
+- **Kupon:** `Order`, `Subscription` ve `LinkPayment` yanıtlarında `discount` (`Discount`: `code`, `amount`; kupon yoksa `None`). Webhook gövdesinde yoktur.
+
+Küçük kırıcı değişiklikler:
+
+- **`create_*` artık kaydı yeniden yazmaz.** `create_order`, `create_subscription` ve `create_payment_link` her çağrıda yeni kayıt ve yeni token açar; aynı `reference` ile tekrar çağırmak eski kaydı güncellemez ve 422 dönmez. Referans tekil değildir. Her yanıtın token'ını saklayın ve değişiklik için `update_*` kullanın.
+- **`CreatePaymentLink.items` isteğe bağlı oldu** (yalnızca `FIXED` tipte zorunludur); alan sıralı değil adla verildiği için mevcut çağrılar etkilenmez.
+- **`PaymentLink.subtotal`, `tax_amount` ve `amount` artık `str | None`.** Ödeyenin tutarı seçtiği linklerde `None` gelir; eskiden boş metin (`''`) okunuyordu.
+- **Yanıt modellerine zorunlu alanlar eklendi** (`PaymentLink`, `Order`, `Subscription`, `Transaction`, `Webhook`). Bu sınıfları testlerde elle kuruyorsanız yeni alanları da verin ya da `from_body()` kullanın.
+- **Bekleyen ödeme:** son 15 dakikada başlamış ödeme yalnızca `update_order` ve `update_subscription` çağrılarını engeller; `create_*` ve `update_payment_link` çağrılarını engellemez.
+
 ## 1.0.1'deki kırıcı değişiklikler
 
 1.0.1, SDK'yı geçidin bugünkü API'sine taşır ve 1.0.0 koduyla uyumlu değildir. 1.0.0'dan geçerken dikkat edilecekler:
@@ -429,7 +508,7 @@ Aşıldığında 429 ve `RateLimitError` döner; `retry_after` kadar bekleyip ay
 - **Webhook:** `order_webhook()`, `subscription_webhook()`, `transaction_webhook()` yerine tek `webhook(method, path, body, timestamp, signature)` (ve `verify_webhook()`); imza istek ve yanıtlarla aynı şemadadır. Gövde yalnızca token taşır (`order_token`, `payment_link_token`, `subscription_token`, `transaction_token`); durum `retrieve_*()` ile sorulur. Adresler panelde tanımlandığı için `SecurePayment`, `CreateOrder`, `UpdateOrder`, `CreateSubscription`, `UpdateSubscription` artık `webhook_url` almaz. `Signature.verify_body()` kalktı.
 - **Kanal kalktı.** `Options.channel_token`, isteklerdeki `channel_token` ve `ChannelMessage` yoktur. Referans alanları `channel_reference` yerine `reference` adını taşır (ödeme, sipariş, abonelik, link, kalem); yanıtlarda `channel_token` yoktur. Geri dönüşte tarayıcı `channel_reference` değil `reference` POST eder.
 - **Sorgular tek uçta.** Her kaynakta tek sorgu metodu vardır: `retrieve_payments`, `retrieve_orders`, `retrieve_subscriptions`, `retrieve_payment_links`, `retrieve_saved_cards`. İstek `token`, `reference`, `created_from`/`created_to` alır ya da boş verilir; yanıt her zaman listedir, bulunamayan kayıt `NotFoundError` değil boş listedir. GET isteği kalmadı.
-- **Gönderim:** sipariş ve abonelik `requiresShipping` ile ödeme sayfasında gönderim adresi ister; gönderim yöntemleri panelde tanımlanır, istekte gönderilmez. Yanıtta yalnızca ödeyenin seçtiği yöntem (`shippingMethod`: `reference`, `title`, `amount`, `taxRate`) gelir.
+- **Gönderim:** sipariş ve abonelik `requires_shipping` ile ödeme sayfasında gönderim adresi ister; gönderim yöntemleri panelde tanımlanır, istekte gönderilmez. Yanıtta yalnızca ödeyenin seçtiği yöntem (`shipping_method`: `reference`, `title`, `amount`, `tax_rate`) gelir.
 - **Kalemler:** `tax_rate` isteğe bağlı; yeni `save_as_product`.
 - **Müşteri:** referans gönderilmeyebilir; o zaman müşteri kaydedilmez ve kart saklanamaz. Abonelikte ve kart saklamada zorunludur. `reference` ve `billing_address` `None` olabilir.
 - **Ödeme linki:** son 50 deneme ve `transactions_count` `retrieve_payment_links()` yanıtında her `PaymentLink` üzerindedir; `PaymentLinkDetails` yalnızca linki taşır.

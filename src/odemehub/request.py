@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar
 
-from .enums import Currency, Period, SubscriptionStatus
+from .enums import AmountType, Currency, CurrencyType, Period, SubscriptionStatus, TaxMode
 
 Body = dict[str, Any]
 
@@ -446,6 +446,18 @@ class RetrievePaymentLinks(Retrieve):
 
 
 @dataclass(frozen=True, kw_only=True)
+class RetrieveLinkPayments(Retrieve):
+    """
+    Payments at the team's links asked after: one by its token, one by the
+    reference the gateway gave it (``LINKPAY{n}``), or the ones made between
+    two days. A payment at a link is opened by the payer paying there, never
+    by the merchant, so it is only ever asked after.
+    """
+
+    endpoint: ClassVar[str] = "retrieve-link-payments"
+
+
+@dataclass(frozen=True, kw_only=True)
 class RetrieveSavedCards(Retrieve):
     """
     Kept cards asked after: one by its token, every card of a customer by
@@ -474,18 +486,17 @@ class CheckoutMessage(Message):
     up of. The customer is whatever is known: it is filled in on the
     checkout page and the payer is asked for the rest.
 
-    Opening is idempotent per reference: opening again under a reference
-    that already has an open order or subscription overwrites it with what
-    is sent and answers with the one that was there, under its own token. A
-    paid order, or a subscription that has been paid, is not touched, and
-    neither is one with a payment under way — the gateway says so on
-    ``reference``.
+    Every opening opens a new one under a new token, even under a reference
+    sent before: the reference is the merchant's own and may repeat, so
+    nothing already there is written over. Keep the token each answer comes
+    back with; it is what names the record to ask after or change it.
     """
 
     #: The key the group travels under: order or subscription.
     group: ClassVar[str]
 
-    #: The reference it is known by in the calling system. Has to carry at least one digit.
+    #: The reference it is known by in the calling system. Has to carry at
+    #: least one digit; it need not be unique.
     reference: str | None = None
     #: Where the customer's browser is posted back to once it is paid, with
     #: the payment's token. An https address reachable from the internet.
@@ -662,86 +673,127 @@ class UpdateSubscription(CheckoutMessage):
 
 
 @dataclass(frozen=True, kw_only=True)
-class CreatePaymentLink(Message):
+class PaymentLinkMessage(Message):
     """
-    A payment link: a page anyone holding it may pay, again and again, until
-    it is switched off or its last day has gone by. It has no customer.
-    Opened again under the same reference, the link already there is
-    written over and answered with.
+    A payment link, opened or changed: a page anyone holding it may pay,
+    again and again, until it is switched off or its last day has gone by.
+    It has no customer.
+
+    What it charges is one of two things. A link of lines (``FIXED``, the
+    default) charges what its lines add up to, the gateway working the total
+    out. A link whose amount the payer picks — any amount they write
+    (``CUSTOM``), one of those offered (``PREDEFINED``), or either
+    (``PREDEFINED_AND_CUSTOM``) — is paid as one line named ``item_name``,
+    with ``tax_rate`` read against it the way ``tax_mode`` says; any lines
+    sent with it are passed over. The money may be the one the link is
+    written in (``CurrencyType.FIXED``, the default), or one the payer picks
+    from ``currencies`` (``SELECTABLE``).
     """
 
-    endpoint: ClassVar[str] = "create-payment-link"
-
-    #: What the link is for; at least one line.
-    items: Sequence[Item]
-    currency: Currency
     #: The reference the link is known by in the calling system. Has to carry
-    #: at least one digit. Left out, the gateway gives it one of the form ``LINK{n}``.
+    #: at least one digit; it need not be unique.
     reference: str | None = None
     description: str | None = None
     #: The account the link is paid through; it has to take 3D payments.
     payment_provider_token: str | None = None
+    #: What the payer pays. Left out on opening, the lines.
+    amount_type: AmountType | None = None
+    #: The name of the one line a payer-picked amount is paid as; needed by
+    #: every type but ``FIXED``.
+    item_name: str | None = None
+    #: The amounts the payer may pick from, at most ten, each as digits with
+    #: the kurus behind a point: '100.00'. Needed by ``PREDEFINED`` and
+    #: ``PREDEFINED_AND_CUSTOM``.
+    predefined_amounts: Sequence[str] | None = None
+    #: The tax on a payer-picked amount, as a percentage: '20'. Left out, it carries none.
+    tax_rate: str | None = None
+    #: Whether ``tax_rate`` is inside the amount paid or added on top of it.
+    #: Left out on opening, inside.
+    tax_mode: TaxMode | None = None
+    #: The money the link is written in, and the one picked to begin with
+    #: when the payer may pick another.
+    currency: Currency | None = None
+    #: Whether the payer may pick the money. Left out on opening, they may not.
+    currency_type: CurrencyType | None = None
+    #: The money the payer may pick besides ``currency``; needed when
+    #: ``currency_type`` is ``SELECTABLE``.
+    currencies: Sequence[Currency] | None = None
+    #: Whether the payer is sent an e-mail once their payment goes through.
+    #: Left out on opening, they are not.
+    emails_payer: bool | None = None
     #: The last day the link may be paid, as ``YYYY-MM-DD`` in the team's
     #: timezone; today or later. Left out, it never runs out.
     expires_at: str | None = None
     #: Whether the link takes payments. Left out, it does.
     is_active: bool | None = None
+    #: What a link of lines is for. Sent on a change, they replace every line
+    #: there was.
+    items: Sequence[Item] | None = None
 
-    def to_body(self) -> Body:
-        return {
-            "payment_link": _said({
-                "reference": self.reference,
-                "description": self.description,
-                "payment_provider_token": self.payment_provider_token,
-                "currency": _value(self.currency),
-                "expires_at": self.expires_at,
-                "is_active": self.is_active,
-                "items": [item.to_body() for item in self.items],
-            }),
-        }
+    def _details(self) -> Body:
+        return _said({
+            "reference": self.reference,
+            "description": self.description,
+            "payment_provider_token": self.payment_provider_token,
+            "amount_type": _value(self.amount_type),
+            "item_name": self.item_name,
+            "predefined_amounts": None if self.predefined_amounts is None else list(self.predefined_amounts),
+            "tax_rate": self.tax_rate,
+            "tax_mode": _value(self.tax_mode),
+            "currency": _value(self.currency),
+            "currency_type": _value(self.currency_type),
+            "currencies": None if self.currencies is None else [_value(currency) for currency in self.currencies],
+            "emails_payer": self.emails_payer,
+            "expires_at": self.expires_at,
+            "is_active": self.is_active,
+            "items": None if self.items is None else [item.to_body() for item in self.items],
+        })
 
 
 @dataclass(frozen=True, kw_only=True)
-class UpdatePaymentLink(Message):
+class CreatePaymentLink(PaymentLinkMessage):
+    """
+    A payment link opened. Every opening opens a new link under a new token,
+    even under a reference sent before; nothing already there is written
+    over. Keep the token the answer comes back with. A link of lines needs at
+    least one line; a link whose amount the payer picks needs none.
+    """
+
+    endpoint: ClassVar[str] = "create-payment-link"
+
+    #: Left out, the gateway gives the link a reference of the form ``LINK{n}``.
+    reference: str | None = None
+    currency: Currency
+
+    def to_body(self) -> Body:
+        return {"payment_link": self._details()}
+
+
+@dataclass(frozen=True, kw_only=True)
+class UpdatePaymentLink(PaymentLinkMessage):
     """
     A change to a payment link, named by its token in the address and again
     in the body. Only what is sent is written; lines sent replace the lines
-    there were. A link whose last day has gone by is switched on again only
-    together with a new day.
+    there were. A link left as, or turned back into, a link of lines has to
+    have lines, so one turned back from a payer-picked amount sends them. A
+    link whose last day has gone by is switched on again by a new day alone.
     """
 
     endpoint: ClassVar[str] = "update-payment-link"
 
     #: The link's token in the gateway.
     token: str
-    items: Sequence[Item] | None = None
-    currency: Currency | None = None
-    reference: str | None = None
-    description: str | None = None
-    payment_provider_token: str | None = None
-    #: As ``YYYY-MM-DD`` in the team's timezone; today or later.
-    expires_at: str | None = None
-    is_active: bool | None = None
-    #: Fields to set to nothing: description, payment_provider_token, expires_at.
+    #: Fields to set to nothing: description, payment_provider_token,
+    #: expires_at, item_name, predefined_amounts, tax_rate, currencies.
     clear: Sequence[str] = ()
 
     def path(self) -> str:
         return f"{self.endpoint}/{self.token}"
 
     def to_body(self) -> Body:
-        link = _said({
-            "reference": self.reference,
-            "description": self.description,
-            "payment_provider_token": self.payment_provider_token,
-            "currency": _value(self.currency),
-            "expires_at": self.expires_at,
-            "is_active": self.is_active,
-            "items": None if self.items is None else [item.to_body() for item in self.items],
-        })
-
         return {
             "token": self.token,
-            "payment_link": _cleared(link, self.clear),
+            "payment_link": _cleared(self._details(), self.clear),
         }
 
 
