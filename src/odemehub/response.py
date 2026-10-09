@@ -799,6 +799,12 @@ class Order:
     payment_provider_token: str | None
     #: Where the order stands: open until it is paid, then paid.
     status: OrderStatus | str
+    #: Whether the checkout page asks the payer where the goods go.
+    requires_shipping: bool
+    #: Whether the customer stays as sent, shown and not asked on the checkout page.
+    locks_customer: bool
+    #: Whether the customer is sent an e-mail at their billing address.
+    emails_customer: bool
     items: list[Item]
     #: The way the payer picked; None until they have.
     shipping_method: ShippingMethod | None
@@ -841,6 +847,9 @@ class Order:
             description=_said(order.get("description")),
             payment_provider_token=_said(order.get("payment_provider_token")),
             status=_known(OrderStatus, order.get("status")),
+            requires_shipping=_boolean(order.get("requires_shipping")),
+            locks_customer=_boolean(order.get("locks_customer")),
+            emails_customer=_boolean(order.get("emails_customer")),
             items=[Item.from_body(_object(item)) for item in _list(order.get("items"))],
             shipping_method=ShippingMethod.from_body(shipping_method) if isinstance(shipping_method, dict) else None,
             subtotal=_string(order.get("subtotal")),
@@ -950,8 +959,9 @@ class PaymentLink:
     #: The money the payer may pick from, ``currency`` among them; None when
     #: the link is paid in ``currency`` alone.
     currencies: list[Currency | str] | None
-    #: Whether the payer is sent an e-mail once their payment goes through.
-    emails_payer: bool
+    #: Whether the payer is sent an e-mail, at the address they give on the
+    #: checkout page, once their payment goes through.
+    emails_customer: bool
     #: Whether the link takes payments right now: switched on and not past its last day.
     is_active: bool
     #: Whether its payments are taken in the test environment now.
@@ -992,7 +1002,7 @@ class PaymentLink:
             currency=_known(Currency, link.get("currency")),
             currency_type=_known(CurrencyType, link.get("currency_type")),
             currencies=None if link.get("currencies") is None else [_known(Currency, currency) for currency in _list(link.get("currencies"))],
-            emails_payer=_boolean(link.get("emails_payer")),
+            emails_customer=_boolean(link.get("emails_customer")),
             is_active=_boolean(link.get("is_active")),
             is_test=_boolean(link.get("is_test")),
             expires_at=_said(link.get("expires_at")),
@@ -1231,6 +1241,12 @@ class Subscription:
     payment_provider_token: str | None
     #: Where it stands.
     status: SubscriptionStatus | str
+    #: Whether the checkout page asks the payer where the goods go.
+    requires_shipping: bool
+    #: Whether the customer stays as sent, shown and not asked on the checkout page.
+    locks_customer: bool
+    #: Whether the customer is sent an e-mail at their billing address.
+    emails_customer: bool
     #: How often a renewal comes round.
     period: Period | str
     #: How many renewals are paid in all; None for one that runs until it is called off.
@@ -1307,6 +1323,9 @@ class Subscription:
             description=_said(subscription.get("description")),
             payment_provider_token=_said(subscription.get("payment_provider_token")),
             status=_known(SubscriptionStatus, subscription.get("status")),
+            requires_shipping=_boolean(subscription.get("requires_shipping")),
+            locks_customer=_boolean(subscription.get("locks_customer")),
+            emails_customer=_boolean(subscription.get("emails_customer")),
             period=_known(Period, subscription.get("period")),
             renewal_limit=_optional_integer(subscription.get("renewal_limit")),
             renewals_paid=_integer(subscription.get("renewals_paid")),

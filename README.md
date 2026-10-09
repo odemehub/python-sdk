@@ -163,6 +163,7 @@ answer = client.create_order(CreateOrder(
     customer=customer,                   # bilinen kadarı; kalanı sayfada sorulur. Hiç verilmeyebilir.
     requires_shipping=True,              # ödeyen adresini ve gönderim yöntemini sayfada seçer
     cancel_url="https://magazam.com/sepet",
+    emails_customer=True,                # ödeme tamamlanınca fatura adresindeki e-postaya bilgilendirme gider
 ))
 
 answer.order.checkout_url      # müşteriyi buraya gönderin
@@ -171,7 +172,9 @@ answer.order.amount            # geçidin hesapladığı toplam
 
 Müşteri istediğiniz kadarıyla verilir: yalnız `reference`, fatura adresi (`billing_address`), gönderim adresi (`shipping_address`) ya da hiçbiri. Verilmeyenler ödeme sayfasında sorulur. Referans verilmezse ödeyen müşteri listenize yazılmaz. `save_as_product=True` olan kalem referansıyla ürün listenize yazılır (referans zorunlu). Gönderim yöntemleri istekte gönderilmez: panelinizdeki **Gönderim Yöntemleri** listesinden ödeyenin adresine uyanlar sunulur.
 
-Yanıttaki `order` siparişi bütünüyle taşır (müşteri hem `answer.customer`'da hem `answer.order.customer`'dadır): `token`, `reference`, `description`, `payment_provider_token`, `status` (`open` / `paid`), `items`, seçilen `shipping_method`, `subtotal`, `shipping_amount`, `tax_amount`, `amount`, `currency`, `discount`, `is_test`, `created_at`, `checkout_url` (ödenince `None`), ödeyen işlem `transaction` (açıkken `None`) ve `customer`.
+**Müşteri kilidi.** `locks_customer=True` gönderilirse ödeme sayfası müşteri bilgisi sormaz; gönderdiğiniz müşteriyi değiştirilemez şekilde gösterir ve ödemeyi onunla alır. Bu durumda fatura adresi eksiksiz olmalıdır; `requires_shipping=True` ise gönderim adresi de (gönderilmezse fatura adresi kullanılır). Eksik alan varsa geçit `ValidationError` ile reddeder.
+
+Yanıttaki `order` siparişi bütünüyle taşır (müşteri hem `answer.customer`'da hem `answer.order.customer`'dadır): `token`, `reference`, `description`, `payment_provider_token`, `status` (`open` / `paid`), `requires_shipping`, `locks_customer`, `emails_customer`, `items`, seçilen `shipping_method`, `subtotal`, `shipping_amount`, `tax_amount`, `amount`, `currency`, `discount`, `is_test`, `created_at`, `checkout_url` (ödenince `None`), ödeyen işlem `transaction` (açıkken `None`) ve `customer`.
 
 **Kupon.** API'de kupon alanı yoktur; ödeyen kodu ödeme sayfasında girer. Kupon kullanıldıysa yanıtta `discount` (`Discount`: `code`, `amount`) gelir, yoksa `None`'dır. Siparişin `subtotal`, `tax_amount` ve `amount` değerleri indirim düşülmüş hâlidir; kupon gönderim ücretinden düşülmez.
 
@@ -206,7 +209,7 @@ answer = client.create_payment_link(CreatePaymentLink(
     currency=Currency.TRY,
     reference="LNK-1",                  # boş bırakılırsa geçit LINK{n} üretir; tekil değildir
     expires_at="2026-12-31",            # çalışma alanının saat dilimine göre son gün
-    emails_payer=True,                  # ödeme tamamlanınca ödeyene e-posta gider
+    emails_customer=True,               # ödeme tamamlanınca ödeyene, sayfada verdiği adrese e-posta gider
 ))
 
 link = answer.payment_link
@@ -291,6 +294,7 @@ answer = client.create_subscription(CreateSubscription(
     items=[Item(name="Premium", unit_amount="99.90", quantity=1, tax_rate="20")],
     customer=customer,
     renewal_limit=12,                   # boş: iptale kadar
+    emails_customer=True,               # her durum değişiminde fatura adresindeki e-postaya bilgilendirme gider
 ))
 
 answer.subscription.checkout_url
@@ -306,6 +310,8 @@ client.update_subscription(UpdateSubscription(token=token, status=SubscriptionSt
 ```
 
 İlk ödeme alındıktan sonra yalnızca iptal (`status`), ödeme sayısı (`renewal_limit`), dönem (`period`) ve aynı kalemlerin birim fiyatı değişebilir; müşteri dahil başka bir alan gönderilirse geçit `ValidationError` ile reddeder. İptalde para iade edilmez; ödenmiş dönem sonuna kadar sürer, sonra abonelik biter. Ödenmiş dönem yoksa hemen `cancelled` olur.
+
+`locks_customer` siparişteki gibi çalışır; yanıt da siparişteki gibi `requires_shipping`, `locks_customer` ve `emails_customer` taşır. `emails_customer` açıkken dönem ödemesi alınamazsa ödeme sayfasının bağlantısı doğrudan müşteriye gider, size ayrıca e-posta gelmez.
 
 Ödeyen ilk ödemede kupon girdiyse `subscription.discount` (`code`, `amount`) dolu gelir; kupon yalnızca ilk ödemeye uygulanır. Aboneliğin kendi `subtotal`, `tax_amount` ve `amount` değerleri indirimsizdir; ilk ödemede çekilen tutar o yenilemenin `renewal.amount` değeridir.
 
@@ -478,6 +484,11 @@ Sınırlar çalışma alanı başına ve dakikalıktır:
 | 60 istek / dk | `secure-payment`, `regular-payment`, `refund-payment`, `cancel-payment`, `create-saved-card`, `delete-saved-card` (300'e ek olarak) |
 
 Aşıldığında 429 ve `RateLimitError` döner; `retry_after` kadar bekleyip aynı isteği yeniden gönderin.
+
+## 1.0.3'teki değişiklikler
+
+- **Müşteri kilidi ve müşteriye e-posta:** `CreateOrder`, `UpdateOrder`, `CreateSubscription` ve `UpdateSubscription` `locks_customer` ve `emails_customer` alır. `Order` ve `Subscription` yanıtları `requires_shipping`, `locks_customer` ve `emails_customer` taşır.
+- **Kırıcı: ödeme linkinde `emails_payer` → `emails_customer`.** `CreatePaymentLink`, `UpdatePaymentLink` ve `PaymentLink` yanıtında alanın adı değişti; geçit eski `emails_payer` adını artık kabul etmez.
 
 ## 1.0.2'deki değişiklikler
 

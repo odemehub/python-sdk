@@ -519,6 +519,15 @@ class CheckoutMessage(Message):
     #: is picks a way of sending from the team's own list, of those that
     #: send there, and its price is added to the amount.
     requires_shipping: bool | None = None
+    #: Whether the customer stays as sent: the checkout page asks the payer
+    #: nothing about who they are and only shows it. Takes a customer with a
+    #: whole billing address, and a whole shipping address too when the
+    #: goods are sent.
+    locks_customer: bool | None = None
+    #: Whether the customer is sent an e-mail at their billing address: on
+    #: an order once it is paid, on a subscription whenever where it stands
+    #: changes.
+    emails_customer: bool | None = None
 
     def _details(self) -> Body:
         return _said({
@@ -529,6 +538,8 @@ class CheckoutMessage(Message):
             "success_url": self.success_url,
             "cancel_url": self.cancel_url,
             "requires_shipping": self.requires_shipping,
+            "locks_customer": self.locks_customer,
+            "emails_customer": self.emails_customer,
             "items": None if self.items is None else [item.to_body() for item in self.items],
         })
 
@@ -718,9 +729,10 @@ class PaymentLinkMessage(Message):
     #: The money the payer may pick besides ``currency``; needed when
     #: ``currency_type`` is ``SELECTABLE``.
     currencies: Sequence[Currency] | None = None
-    #: Whether the payer is sent an e-mail once their payment goes through.
-    #: Left out on opening, they are not.
-    emails_payer: bool | None = None
+    #: Whether the payer is sent an e-mail, at the address they give on the
+    #: checkout page, once their payment goes through. Left out on opening,
+    #: they are not.
+    emails_customer: bool | None = None
     #: The last day the link may be paid, as ``YYYY-MM-DD`` in the team's
     #: timezone; today or later. Left out, it never runs out.
     expires_at: str | None = None
@@ -743,7 +755,7 @@ class PaymentLinkMessage(Message):
             "currency": _value(self.currency),
             "currency_type": _value(self.currency_type),
             "currencies": None if self.currencies is None else [_value(currency) for currency in self.currencies],
-            "emails_payer": self.emails_payer,
+            "emails_customer": self.emails_customer,
             "expires_at": self.expires_at,
             "is_active": self.is_active,
             "items": None if self.items is None else [item.to_body() for item in self.items],
