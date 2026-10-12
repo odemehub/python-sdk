@@ -103,25 +103,21 @@ class Address:
 @dataclass(frozen=True, kw_only=True)
 class Customer:
     """
-    The customer a payment is made for, an order or a subscription is opened
-    for, or a card is kept for: the merchant's own key for them, where they
-    are billed and, for goods, where those go.
+    The customer an order or a subscription is opened for: the merchant's
+    own key for them, where they are billed and, for goods, where those go.
+    Any part of the three may be given; what is left out is asked on the
+    checkout page. Payments and kept cards take a ``PaymentCustomer``
+    instead.
 
     The reference is what makes them one of the team's customers: the
     customer is written under it once a payment for them goes through, and
     their cards are kept for them and found again by it. It may be left out
-    of a payment or an order, and the payer is then nobody the team keeps;
-    but a payment that keeps its card, a card kept on its own and a
-    subscription have to carry it.
-
-    Payments and kept cards take the reference and the billing address only;
-    orders and subscriptions take any part of the three.
+    of an order; a subscription has to carry it.
     """
 
     #: The key the merchant keeps this customer under in its own system.
     reference: str | None = None
     billing_address: Address | None = None
-    #: Orders and subscriptions only.
     shipping_address: Address | None = None
 
     def to_body(self) -> Body:
@@ -129,6 +125,31 @@ class Customer:
             "reference": self.reference,
             "billing_address": None if self.billing_address is None else self.billing_address.to_body(),
             "shipping_address": None if self.shipping_address is None else self.shipping_address.to_body(),
+        })
+
+
+@dataclass(frozen=True, kw_only=True)
+class PaymentCustomer:
+    """
+    The customer a payment is made for or a card is kept for: the whole
+    billing address and the merchant's own key for them. Nothing goes to a
+    shipping address here; the gateway turns down a payment or a kept card
+    that names one.
+
+    The reference may be left out of a payment, and the payer is then nobody
+    the team keeps; but a payment that keeps its card, one made with a kept
+    card and a card kept on its own have to carry it.
+    """
+
+    #: All eight person fields; the three company fields together or not at all.
+    billing_address: Address
+    #: The key the merchant keeps this customer under in its own system.
+    reference: str | None = None
+
+    def to_body(self) -> Body:
+        return _said({
+            "reference": self.reference,
+            "billing_address": self.billing_address.to_body(),
         })
 
 
@@ -236,7 +257,7 @@ class Payment(Message):
     #: Who is paying: the whole billing address and, when the merchant keeps
     #: them, their reference. A payment that keeps its card, or is made with
     #: a kept one, has to name the customer the card is theirs.
-    customer: Customer
+    customer: PaymentCustomer
     #: The card typed in. Left out only when a kept card is named instead.
     card: Card | None = None
     #: A card the customer let the merchant keep, by the token the gateway
@@ -827,7 +848,7 @@ class CreateSavedCard(Message):
     endpoint: ClassVar[str] = "create-saved-card"
 
     #: Who the card belongs to: the reference and the whole billing address, both required.
-    customer: Customer
+    customer: PaymentCustomer
     card: Card
     #: The payment account to keep the card at; it has to keep cards. Left
     #: out, the team's default account is used.

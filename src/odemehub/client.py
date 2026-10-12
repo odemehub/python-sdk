@@ -34,7 +34,7 @@ class Options:
     the address, so a pair only ever opens its own team's endpoints.
     """
 
-    #: The address the application is served from, e.g. https://app.odemehub.com.
+    #: The address the application is served from, e.g. https://sandbox.odemehub.com while building and https://app.odemehub.com once live.
     base_url: str
     #: The team the payments are made on behalf of: the ten-digit workspace id
     #: the Entegrasyon page shows.

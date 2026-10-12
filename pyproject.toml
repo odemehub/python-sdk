@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "odemehub"
-version = "1.0.3"
+version = "1.0.4"
 description = "ödemehub ödeme geçidi için Python istemcisi."
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -12,7 +12,8 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/odemehub/python-sdk"
+Homepage = "https://dev.odemehub.com/"
+Documentation = "https://dev.odemehub.com/"
 Repository = "https://github.com/odemehub/python-sdk"
 Issues = "https://github.com/odemehub/python-sdk/issues"
 

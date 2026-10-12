@@ -4,6 +4,8 @@
 
 İstemci her isteği gizli anahtarınızla imzalar, gelen her yanıtın imzasını doğrular. Siz imza, başlık ya da JSON ayrıntılarıyla uğraşmazsınız. Her uç nokta için bir metot vardır ve adı uç noktanın adıdır: `create-order` için `create_order()`, `retrieve-saved-cards` için `retrieve_saved_cards()`. Yalnızca standart kütüphaneyi kullanır; kurulacak başka paket yoktur. Tip ipuçları pakettedir.
 
+Uç noktaların, alanların ve akışların ayrıntılı anlatımı geliştirici dokümantasyonundadır: [dev.odemehub.com](https://dev.odemehub.com/).
+
 ## Kurulum
 
 Python 3.10 ve üzeri gerekir.
@@ -16,13 +18,15 @@ pip install odemehub
 
 Üç bilgi gerekir. Hepsi paneldeki **Entegrasyon** sayfasındadır: Çalışma Alanı Kimliğiniz, API anahtarı ve gizli anahtar.
 
+Entegrasyonu sandbox'ta (`https://sandbox.odemehub.com`) geliştirin; sandbox'ta hesap açın ve bilgileri oradaki panelden alın. Canlıya çıkarken `app.odemehub.com` üzerinde açtığınız hesabın bilgileriyle `base_url`'i `https://app.odemehub.com` yapın.
+
 ```python
 import os
 
 from odemehub import Client, Options
 
 client = Client(Options(
-    base_url="https://app.odemehub.com",
+    base_url="https://sandbox.odemehub.com",
     team="1000000001",                                     # Çalışma Alanı Kimliği
     api_key=os.environ["ODEMEHUB_API_KEY"],
     api_secret=os.environ["ODEMEHUB_API_SECRET"],
@@ -62,11 +66,11 @@ Test vektörü: `secret_test` anahtarıyla, `1700000000` anında, `/api/10000000
 Müşteri hiçbir yere gitmez. Başarılı yanıt, paranın alındığı anlamına gelir.
 
 ```python
-from odemehub.request import Address, Card, Customer, RegularPayment
+from odemehub.request import Address, Card, PaymentCustomer, RegularPayment
 
-customer = Customer(
+customer = PaymentCustomer(
     reference="musteri-88",            # sizdeki müşteri anahtarı; kart saklanacaksa zorunlu
-    billing_address=Address(
+    billing_address=Address(           # sekiz alanın hepsi zorunlu
         firstname="Ahmet", lastname="Yılmaz",
         email="ahmet@ornek.com", phone="05551112233",
         address="Kızılırmak Mah. Dumlupınar Blv. No:3",
@@ -104,6 +108,8 @@ Yanıtın `transaction` alanı ödemeyi bütünüyle söyler: `token`, `referenc
 Faturada şirket adı gerekiyorsa `company_title`, `tax_number` ve `tax_office` fatura adresine üçü birlikte verilir.
 
 Kayıtlı kartla ödemede `card` yerine `saved_card_token` verilir; ödeme kartın saklandığı hesaptan geçer, `payment_provider_token` gönderilmez. Kart hangi müşteri referansıyla saklandıysa ödeme de aynı referansı taşımalıdır.
+
+Ödeme ve kart saklama müşteriyi `PaymentCustomer` ile alır: yalnızca `reference` ve `billing_address`. Gönderim adresi sipariş ve aboneliğe aittir; onlar `Customer` alır.
 
 **Müşteriler.** `customer.reference` gönderdiğiniz ödeme başarılı olunca geçit müşteriyi o referansla çalışma alanınızın müşteri listesine yazar ya da günceller; başarısız ödeme müşteriye dokunmaz. Referans göndermezseniz ödeme yine alınır ama müşteri kaydedilmez ve kart saklanamaz. Saklanan kart müşteriye bağlanır; müşterinin son ödeme yaptığı kart varsayılan kartı olur.
 
@@ -394,7 +400,7 @@ Aynısı `retrieve_orders()` (`RetrieveOrders`), `retrieve_subscriptions()` (`Re
 
 ## Webhook
 
-Sipariş ödendiğinde, link ödemesi alındığında, abonelik durum değiştirdiğinde, API ödemesi bittiğinde ve bir ödeme iade ya da iptal edildiğinde geçit imzalı JSON POST eder. Adresler kodda verilmez; panelde **Ayarlar → Webhook** sayfasında olay ve adres seçilerek tanımlanır.
+Sipariş ödendiğinde, link ödemesi alındığında, abonelik durum değiştirdiğinde, API ödemesi bittiğinde ve bir ödeme iade ya da iptal edildiğinde geçit imzalı JSON POST eder. Adresler kodda verilmez; panelde **Ödeme Ayarları → Webhook** sayfasında tanımlanır. Bir adres birden çok olayı dinleyebilir; **Tüm olaylar** seçilirse her olay o adrese gelir. Aynı olay birden çok adreste seçilirse bildirim her adrese ayrı gider.
 
 | Kaynak | Olaylar |
 | --- | --- |
@@ -444,7 +450,9 @@ def webhook():
     return "", 204
 ```
 
-Sipariş, abonelik ve link olaylarında para hareketi varsa `transaction_token` da gelir; `retrieve_payments()` yanıtındaki `order_token` / `payment_link_token` / `link_payment_token` / `subscription_token` ödemenin gerçekten o kaynağa ait olduğunu gösterir. Yalnızca doğrulamak için `client.verify_webhook(...)` `bool` döner. Geçit 2xx yanıt alana kadar 60 sn, 5 dk, 15 dk ve 30 dk arayla toplam 5 kez dener; yönlendirmeleri izlemez.
+Sipariş, abonelik ve link olaylarında para hareketi varsa `transaction_token` da gelir; `retrieve_payments()` yanıtındaki `order_token` / `payment_link_token` / `link_payment_token` / `subscription_token` ödemenin gerçekten o kaynağa ait olduğunu gösterir. Yalnızca doğrulamak için `client.verify_webhook(...)` `bool` döner. Adres https ve herkese açık olmalıdır.
+
+İlk gönderim olaydan 30 saniye sonra yapılır. Geçit 2xx yanıt alana kadar 60 sn, 5 dk, 15 dk ve 30 dk arayla toplam 5 kez dener; yönlendirmeleri izlemez. Adres panelden kapatılır ya da silinirse otomatik gönderimler durur. Denemeleri biten bildirim panelde ilgili kaydın sayfasından elle yeniden gönderilebilir; elle gönderim beklemeden, aynı `id` ve gövdeyle, bildirim kaydındaki adrese gider.
 
 ## Hatalar
 
@@ -484,6 +492,14 @@ Sınırlar çalışma alanı başına ve dakikalıktır:
 | 60 istek / dk | `secure-payment`, `regular-payment`, `refund-payment`, `cancel-payment`, `create-saved-card`, `delete-saved-card` (300'e ek olarak) |
 
 Aşıldığında 429 ve `RateLimitError` döner; `retry_after` kadar bekleyip aynı isteği yeniden gönderin.
+
+## 1.0.4'teki değişiklikler
+
+- **Sandbox'la başlayan kurulum:** README ve `Options.base_url` açıklaması entegrasyonu `https://sandbox.odemehub.com` üzerinde geliştirip canlıya çıkarken `base_url`'i `https://app.odemehub.com` yapmayı anlatır.
+- **`PaymentCustomer`:** ödemenin ve kart saklamanın müşterisi; yalnızca `billing_address` (zorunlu) ve `reference` taşır.
+- **Webhook anlatımı güncellendi:** menü **Ödeme Ayarları → Webhook**, bir adres birden çok olay (ya da **Tüm olaylar**), ilk gönderim olaydan 30 saniye sonra, kapatılan ya da silinen adrese otomatik gönderim yapılmaz, elle yeniden gönderim bildirim kaydındaki adrese gider.
+- **Dokümantasyon bağlantısı:** README ve `pyproject.toml` (`Homepage`, `Documentation`) geliştirici dokümantasyonunu ([dev.odemehub.com](https://dev.odemehub.com/)) gösterir.
+- **Kırıcı: `RegularPayment`, `SecurePayment` ve `CreateSavedCard` artık `Customer` değil `PaymentCustomer` alır.** Geçit ödemede ve kart saklamada gönderim adresini 422 ile reddettiği için `shipping_address` taşıyabilen `Customer` bu isteklerden çıktı. Ödeme kodunda `Customer(` → `PaymentCustomer(`; `billing_address` artık zorunludur. Sipariş ve abonelik `Customer` almaya devam eder.
 
 ## 1.0.3'teki değişiklikler
 
