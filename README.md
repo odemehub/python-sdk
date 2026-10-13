@@ -111,6 +111,8 @@ Kayıtlı kartla ödemede `card` yerine `saved_card_token` verilir; ödeme kart�
 
 Ödeme ve kart saklama müşteriyi `PaymentCustomer` ile alır: yalnızca `reference` ve `billing_address`. Gönderim adresi sipariş ve aboneliğe aittir; onlar `Customer` alır.
 
+**Varsayılan Ödeyen.** Panelde **Ödeme Ayarları → Varsayılan Ödeyen** açıksa fatura adresinin alanlarını eksik bırakabilir, `billing_address`'i hiç vermeyebilirsiniz; ödemede `customer` da verilmeyebilir. Verilmeyen alanlar gövdeye yazılmaz, ödeme sağlayıcısına varsayılan ödeyenin bilgisiyle gider. Kart saklarken `customer.reference` yine zorunludur. Ayar kapalıyken sekiz alanın hepsi zorunludur; eksik istek 422 (`ValidationError`) alır.
+
 **Müşteriler.** `customer.reference` gönderdiğiniz ödeme başarılı olunca geçit müşteriyi o referansla çalışma alanınızın müşteri listesine yazar ya da günceller; başarısız ödeme müşteriye dokunmaz. Referans göndermezseniz ödeme yine alınır ama müşteri kaydedilmez ve kart saklanamaz. Saklanan kart müşteriye bağlanır; müşterinin son ödeme yaptığı kart varsayılan kartı olur.
 
 Tutarlar nokta ayraçlı ve en çok iki ondalıklı metindir: `"100"`, `"100.1"`, `"100.10"`. İmzalanıp gönderildiği gibi kalır, yolda yuvarlanmaz. Para birimi `Currency` ile verilir (`currency=Currency.USD`), boş bırakılırsa TRY'dir. Kart numarası gruplar arasında boşlukla da gönderilebilir.
@@ -461,7 +463,7 @@ Bütün hatalar `OdemehubError`'dan türer; tek bir `except` hepsini yakalar.
 | Hata | Durum | Anlamı |
 | --- | --- | --- |
 | `AuthenticationError` | 401 | API anahtarı yanlış, imza tutmuyor ya da zaman damgası aralık dışında |
-| `ForbiddenError` | 403 | Çalışma alanı işlem yapamıyor (ödenmemiş bakiye, plan) ya da plan bu özelliği kapsamıyor / modül kapalı |
+| `ForbiddenError` | 403 | Çalışma alanı işlem yapamıyor (ödenmemiş bakiye) ya da ucun modülü kapalı; açtırmak için bizimle iletişime geçin |
 | `NotFoundError` | 404 | Güncellenmek, silinmek, iade ya da iptal edilmek istenen kayıt yok (sorgularda boş liste döner) |
 | `ValidationError` | 422 | Alan hataları; `error.errors` noktalı alan adıyla (`transaction.amount`, `order.items.0.name`) |
 | `RateLimitError` | 429 | İstek sınırı; `error.retry_after` saniye |
@@ -492,6 +494,11 @@ Sınırlar çalışma alanı başına ve dakikalıktır:
 | 60 istek / dk | `secure-payment`, `regular-payment`, `refund-payment`, `cancel-payment`, `create-saved-card`, `delete-saved-card` (300'e ek olarak) |
 
 Aşıldığında 429 ve `RateLimitError` döner; `retry_after` kadar bekleyip aynı isteği yeniden gönderin.
+
+## 1.0.5'teki değişiklikler
+
+- **Varsayılan Ödeyen: fatura adresi isteğe bağlı.** `PaymentCustomer.billing_address` ve `RegularPayment` / `SecurePayment`'ın `customer` alanı artık isteğe bağlıdır (varsayılan `None`); verilmezse gövdeye yazılmaz. Çalışma alanında Varsayılan Ödeyen açıksa geçit eksik fatura bilgisini varsayılan ödeyenden tamamlar; kapalıyken eskisi gibi 422 döner. `CreateSavedCard`'da `customer` (ve `reference`) zorunlu kalır, `billing_address` verilmeyebilir. Alanlar adla verildiği için mevcut çağrılar etkilenmez.
+- **403 açıklaması:** `ForbiddenError` artık ödenmemiş bakiyeyi ya da ucun modülünün kapalı olduğunu söyler (plan sistemi kalktı); modülü açtırmak için bizimle iletişime geçin. `Card.should_save` açıklaması planı değil Kayıtlı Kartlar modülünü anar.
 
 ## 1.0.4'teki değişiklikler
 

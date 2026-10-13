@@ -145,15 +145,16 @@ class PaymentCustomer:
     """
 
     #: All eight person fields, unless the team fills what is left out from its
-    #: default payer; the three company fields together or not at all.
-    billing_address: Address
+    #: default payer; the three company fields together or not at all. Left
+    #: out, it is not sent, which only a team with a default payer may do.
+    billing_address: Address | None = None
     #: The key the merchant keeps this customer under in its own system.
     reference: str | None = None
 
     def to_body(self) -> Body:
         return _said({
             "reference": self.reference,
-            "billing_address": self.billing_address.to_body(),
+            "billing_address": None if self.billing_address is None else self.billing_address.to_body(),
         })
 
 
@@ -179,9 +180,9 @@ class Card:
     security_code: str | None = field(default=None, repr=False)
     #: Whether the customer asked for this card to be kept after a
     #: successful payment, so they can pay with it again without typing it
-    #: out. Needs a customer reference to be kept for, a plan that covers
-    #: saved cards and an account whose provider keeps cards. Read only by
-    #: payments; left out, it is not sent.
+    #: out. Needs a customer reference to be kept for, the Kayıtlı Kartlar
+    #: module turned on and an account whose provider keeps cards. Read only
+    #: by payments; left out, it is not sent.
     should_save: bool | None = None
 
     def to_body(self) -> Body:
@@ -261,8 +262,9 @@ class Payment(Message):
     #: Who is paying: the whole billing address, or what is known of it where
     #: the team fills the rest from its default payer, and, when the merchant
     #: keeps them, their reference. A payment that keeps its card, or is made with
-    #: a kept one, has to name the customer the card is theirs.
-    customer: PaymentCustomer
+    #: a kept one, has to name the customer the card is theirs. Left out, it is
+    #: not sent, which only a team with a default payer may do.
+    customer: PaymentCustomer | None = None
     #: The card typed in. Left out only when a kept card is named instead.
     card: Card | None = None
     #: A card the customer let the merchant keep, by the token the gateway
@@ -292,7 +294,7 @@ class Payment(Message):
                 "ip": self.ip,
                 "saved_card_token": self.saved_card_token,
             }),
-            "customer": self.customer.to_body(),
+            "customer": None if self.customer is None else self.customer.to_body(),
             "card": None if self.card is None else self.card.to_body(),
         })
 
@@ -852,9 +854,9 @@ class CreateSavedCard(Message):
 
     endpoint: ClassVar[str] = "create-saved-card"
 
-    #: Who the card belongs to: the reference and the whole billing address, both
-    #: required; what is left out of the address is filled from the team's default
-    #: payer, where it uses one.
+    #: Who the card belongs to: the reference, always required, and the whole
+    #: billing address; what is left out of the address, or the address
+    #: itself, is filled from the team's default payer, where it uses one.
     customer: PaymentCustomer
     card: Card
     #: The payment account to keep the card at; it has to keep cards. Left
