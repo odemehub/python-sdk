@@ -70,7 +70,7 @@ from odemehub.request import Address, Card, PaymentCustomer, RegularPayment
 
 customer = PaymentCustomer(
     reference="musteri-88",            # sizdeki müşteri anahtarı; kart saklanacaksa zorunlu
-    billing_address=Address(           # sekiz alanın hepsi zorunlu
+    billing_address=Address(           # sekiz alanın hepsi zorunlu (Varsayılan Ödeyen açıksa eksik olabilir)
         firstname="Ahmet", lastname="Yılmaz",
         email="ahmet@ornek.com", phone="05551112233",
         address="Kızılırmak Mah. Dumlupınar Blv. No:3",

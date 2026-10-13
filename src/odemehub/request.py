@@ -63,8 +63,9 @@ class Address:
     """
     Where a customer is billed, or where their goods go. A payment and a
     kept card need the whole of the eight person fields on the billing
-    address; an order or a subscription takes whatever is known and asks the
-    payer for the rest on the checkout page.
+    address, unless the team fills what is left out from its default payer
+    (Varsayılan Ödeyen); an order or a subscription takes whatever is known
+    and asks the payer for the rest on the checkout page.
 
     The three company fields are read on the billing address only, and
     always together: the gateway turns down an address that names one of
@@ -132,7 +133,9 @@ class Customer:
 class PaymentCustomer:
     """
     The customer a payment is made for or a card is kept for: the whole
-    billing address and the merchant's own key for them. Nothing goes to a
+    billing address, or what is known of it where the team fills the rest
+    from its default payer (Varsayılan Ödeyen), and the merchant's own key
+    for them. Nothing goes to a
     shipping address here; the gateway turns down a payment or a kept card
     that names one.
 
@@ -141,7 +144,8 @@ class PaymentCustomer:
     card and a card kept on its own have to carry it.
     """
 
-    #: All eight person fields; the three company fields together or not at all.
+    #: All eight person fields, unless the team fills what is left out from its
+    #: default payer; the three company fields together or not at all.
     billing_address: Address
     #: The key the merchant keeps this customer under in its own system.
     reference: str | None = None
@@ -254,8 +258,9 @@ class Payment(Message):
     installment_number: int
     #: The address the customer is paying from, as the merchant sees it.
     ip: str
-    #: Who is paying: the whole billing address and, when the merchant keeps
-    #: them, their reference. A payment that keeps its card, or is made with
+    #: Who is paying: the whole billing address, or what is known of it where
+    #: the team fills the rest from its default payer, and, when the merchant
+    #: keeps them, their reference. A payment that keeps its card, or is made with
     #: a kept one, has to name the customer the card is theirs.
     customer: PaymentCustomer
     #: The card typed in. Left out only when a kept card is named instead.
@@ -847,7 +852,9 @@ class CreateSavedCard(Message):
 
     endpoint: ClassVar[str] = "create-saved-card"
 
-    #: Who the card belongs to: the reference and the whole billing address, both required.
+    #: Who the card belongs to: the reference and the whole billing address, both
+    #: required; what is left out of the address is filled from the team's default
+    #: payer, where it uses one.
     customer: PaymentCustomer
     card: Card
     #: The payment account to keep the card at; it has to keep cards. Left
