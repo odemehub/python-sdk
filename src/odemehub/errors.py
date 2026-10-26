@@ -30,9 +30,12 @@ class ForbiddenError(OdemehubError):
 
 class NotFoundError(OdemehubError):
     """
-    The record the request names is not there (HTTP 404): no payment,
-    order, payment link, subscription or kept card of the team's carries
-    that token. Somebody else's record is answered the same way.
+    The record the request names by its token is not there (HTTP 404): no
+    payment, order, payment link, subscription, kept card or bank account
+    of the team's carries that token. Somebody else's record is answered
+    the same way. Only a change, a removal, a refund or a cancellation is
+    answered so; asking after records by token, reference or days finds
+    nothing and answers with an empty list instead.
     """
 
 

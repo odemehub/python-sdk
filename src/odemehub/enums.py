@@ -170,14 +170,6 @@ class RefundType(str, Enum):
     REFUND = "refund"
 
 
-class RefundStatus(str, Enum):
-    """Where a giving back stands."""
-
-    PENDING = "pending"
-    SUCCESSFUL = "successful"
-    FAILED = "failed"
-
-
 class CardScheme(str, Enum):
     """The network a card belongs to."""
 

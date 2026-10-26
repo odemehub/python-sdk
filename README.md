@@ -1,6 +1,6 @@
 # ödemehub Python SDK
 
-ödemehub ödeme geçidini kendi uygulamanızdan kullanmak için Python istemcisi. Kart çekmek, 3D ödeme başlatmak, sipariş, abonelik ve ödeme linki açmak, kart saklamak, iade ve iptal yapmak, taksit sormak: hepsi burada.
+ödemehub ödeme geçidini kendi uygulamanızdan kullanmak için Python istemcisi. Kart çekmek, 3D ödeme başlatmak, sipariş, abonelik ve ödeme linki açmak, kart saklamak, iade ve iptal yapmak, taksit sormak, banka hesabı hareketlerini okumak: hepsi burada.
 
 İstemci her isteği gizli anahtarınızla imzalar, gelen her yanıtın imzasını doğrular. Siz imza, başlık ya da JSON ayrıntılarıyla uğraşmazsınız. Her uç nokta için bir metot vardır ve adı uç noktanın adıdır: `create-order` için `create_order()`, `retrieve-saved-cards` için `retrieve_saved_cards()`. Yalnızca standart kütüphaneyi kullanır; kurulacak başka paket yoktur. Tip ipuçları pakettedir.
 
@@ -35,7 +35,7 @@ client = Client(Options(
 
 Gizli anahtar hiçbir zaman tel üzerinden gitmez; yalnızca imza üretmekte ve doğrulamakta kullanılır. Anahtarları kodun içine yazmayın, ortam değişkeninde tutun.
 
-Geçit hiçbir yerde veritabanı numarası kullanmaz: ödeme hesabı, işlem, sipariş, abonelik, link, link ödemesi ve kayıtlı kart her zaman token'ıyla anılır. `reference` sizin kendi numaranızdır ve tekil değildir; bir kaydı her zaman token'ı adlandırır.
+Geçit hiçbir yerde veritabanı numarası kullanmaz: ödeme hesabı, işlem, sipariş, abonelik, link, link ödemesi, kayıtlı kart, banka hesabı ve banka hareketi her zaman token'ıyla anılır. `reference` sizin kendi numaranızdır ve tekil değildir; bir kaydı her zaman token'ı adlandırır.
 
 İstek bir dakika içinde yanıt almazsa kesilir; süreyi `Options(timeout=...)` (saniye) ile değiştirebilirsiniz. İstekler standart kütüphanenin `urllib`'iyle gider; `requests` ya da `httpx` kullanmak isterseniz `send(method, url, headers, body, timeout)` metodu olan bir nesneyi `Client(options, transport=...)` ile verebilirsiniz. Bütün istekler JSON gövdeli POST'tur.
 
@@ -43,7 +43,7 @@ Geçit hiçbir yerde veritabanı numarası kullanmaz: ödeme hesabı, işlem, si
 
 ## Sabit değerler
 
-Para birimi, dönem, durumlar, kart şeması ve tipi gibi sabit kümeler `odemehub.enums` modülündedir ve `str` tabanlı `Enum`'dur: `Currency`, `Period`, `OrderStatus`, `SubscriptionStatus`, `LinkPaymentStatus`, `TransactionStatus`, `PaymentStatus`, `SecurityType`, `RefundType`, `RefundStatus`, `CardScheme`, `CardType`, `WebhookEvent`, `AmountType`, `CurrencyType`, `TaxMode`. Bir üye geçidin gönderdiği metnin kendisidir ve ona eşittir (`TransactionStatus.SUCCESSFUL == "successful"`).
+Para birimi, dönem, durumlar, kart şeması ve tipi gibi sabit kümeler `odemehub.enums` modülündedir ve `str` tabanlı `Enum`'dur: `Currency`, `Period`, `OrderStatus`, `SubscriptionStatus`, `LinkPaymentStatus`, `TransactionStatus`, `PaymentStatus`, `SecurityType`, `RefundType`, `CardScheme`, `CardType`, `WebhookEvent`, `AmountType`, `CurrencyType`, `TaxMode`. Bir üye geçidin gönderdiği metnin kendisidir ve ona eşittir (`TransactionStatus.SUCCESSFUL == "successful"`).
 
 İsteklerde bu alanlar üyeyle verilir (`currency=Currency.USD`, `period=Period.MONTHLY`). Yanıtlarda okunan değer üyeye çevrilir; geçit bu sürümün bilmediği yeni bir değer gönderirse SDK çökmez, değer geldiği gibi düz metin olarak kalır.
 
@@ -155,6 +155,8 @@ def odeme_donus():
 
 Başkasının işlemini sorarsanız liste boş döner.
 
+Canlıda `callback_url`, `success_url` ve `cancel_url` internetten erişilebilen https adresleri olmalıdır. Sandbox'ta her http ya da https adresi geçer; geliştirirken dönüş adresi olarak `http://localhost` ya da `.test` adresi kullanabilirsiniz.
+
 ## Sipariş
 
 Kart sizde sorulmaz. Siparişi açarsınız, geçit kendi ödeme sayfasının adresini döner, müşteri orada öder. Tutar gönderilmez: geçit kalemleri ve ödeyenin panelinizdeki listeden seçtiği gönderim yöntemini toplar. Birim tutarlar KDV dahildir.
@@ -178,7 +180,7 @@ answer.order.checkout_url      # müşteriyi buraya gönderin
 answer.order.amount            # geçidin hesapladığı toplam
 ```
 
-Müşteri istediğiniz kadarıyla verilir: yalnız `reference`, fatura adresi (`billing_address`), gönderim adresi (`shipping_address`) ya da hiçbiri. Verilmeyenler ödeme sayfasında sorulur. Referans verilmezse ödeyen müşteri listenize yazılmaz. `save_as_product=True` olan kalem referansıyla ürün listenize yazılır (referans zorunlu). Gönderim yöntemleri istekte gönderilmez: panelinizdeki **Gönderim Yöntemleri** listesinden ödeyenin adresine uyanlar sunulur.
+Müşteri istediğiniz kadarıyla verilir: yalnız `reference`, fatura adresi (`billing_address`), gönderim adresi (`shipping_address`) ya da hiçbiri. Gönderim adresi yalnızca sekiz kişi alanını alır; `company_title`, `tax_number` ya da `tax_office` içeren gönderim adresi 422 (`ValidationError`) ile reddedilir. Verilmeyenler ödeme sayfasında sorulur. Referans verilmezse ödeyen müşteri listenize yazılmaz. `save_as_product=True` olan kalem referansıyla ürün listenize yazılır (referans zorunlu). Gönderim yöntemleri istekte gönderilmez: panelinizdeki **Gönderim Yöntemleri** listesinden ödeyenin adresine uyanlar sunulur.
 
 **Müşteri kilidi.** `locks_customer=True` gönderilirse ödeme sayfası müşteri bilgisi sormaz; gönderdiğiniz müşteriyi değiştirilemez şekilde gösterir ve ödemeyi onunla alır. Bu durumda fatura adresi eksiksiz olmalıdır; `requires_shipping=True` ise gönderim adresi de (gönderilmezse fatura adresi kullanılır). Eksik alan varsa geçit `ValidationError` ile reddeder.
 
@@ -201,6 +203,8 @@ client.update_order(UpdateOrder(token=token, description="Hediye paketi", clear=
 ```
 
 Bir alanı vermemek onu olduğu gibi bırakır; boşaltmak için adını `clear` listesine yazın.
+
+Bir sipariş, abonelik ya da ödeme linki en çok 100 kalem taşır; fazlası 422 (`ValidationError`) alır.
 
 `create_*` her çağrıda yeni bir kayıt ve yeni bir token açar; aynı `reference` daha önce gönderilmiş olsa da eski kayıt değişmez ve istek reddedilmez. Bu yüzden her `create_*` yanıtındaki token'ı saklayın: kaydı sorgularken ve değiştirirken onu kullanırsınız. Var olan kayıt `update_*` ile değişir. Ödenmiş sipariş değişmez. Ödeme sayfasında son 15 dakika içinde başlamış bir ödeme varken `update_order` ve `update_subscription` `token` alanında reddedilir; link güncellemesini bekleyen ödeme engellemez.
 
@@ -264,7 +268,7 @@ answer = client.create_payment_link(CreatePaymentLink(
 answer.payment_link.amount              # None: tutarı ödeyen seçer
 ```
 
-Güncellemede `clear` listesi `description`, `payment_provider_token`, `expires_at`, `item_name`, `predefined_amounts`, `tax_rate` ve `currencies` alanlarını boşaltabilir. Ödeyenin seçtiği tipten `FIXED`'e dönen link kalem göndermek zorundadır.
+Güncellemede `clear` listesi `description`, `payment_provider_token`, `expires_at`, `item_name`, `predefined_amounts`, `tax_rate` ve `currencies` alanlarını boşaltabilir. Yalnızca `token` verilip değiştirilecek hiçbir alan gönderilmezse geçit 422 döner. Ödeyenin seçtiği tipten `FIXED`'e dönen link kalem göndermek zorundadır.
 
 **Link ödemeleri.** Linkte kimin ne ödediği `retrieve_link_payments()` ile okunur. Her ödeme yapıldığında geçit bir link ödemesi (`LinkPayment`) açar; referansı geçidin verdiği `LINKPAY{n}`'dir.
 
@@ -285,7 +289,7 @@ for link_payment in payments.link_payments:
 payments.paid()                         # ödenmiş olanlar
 ```
 
-`LinkPayment` alanları: `token`, `reference`, `payment_link` (`token`, `reference`), `payment_provider_token`, `status`, `items` (görselsiz), `subtotal`, `tax_amount`, `amount`, `discount`, `currency`, `customer` (yalnız `billing_address`; yoksa `None`), `is_test`, `created_at` ve ödeyen işlem `transaction` (`token`, `reference`, `payment_status`; açıkken `None`).
+`LinkPayment` alanları: `token`, `reference`, `payment_link` (`token`, `reference`), `payment_provider_token`, `status`, `items` (görselsiz), `subtotal`, `tax_amount`, `amount`, `discount`, `currency`, `customer` (yalnız `billing_address`, müşteri referansı yoktur; yoksa `None`), `is_test`, `created_at` ve ödeyen işlem `transaction` (`token`, `reference`, `payment_status`; açıkken `None`).
 
 ## Abonelik
 
@@ -375,6 +379,68 @@ for installment in bin.installments:
 
 Hesap vermezseniz taksitler ödemenin yönlendirileceği hesaptan gelir; böylece çekilen tutar gösterdiğinizle aynı olur. Taksit yalnızca TRY ödemelerde vardır; başka para biriminde liste boş döner. Taksitli satışta taksidin toplamını `amount`, sattığınız tutarı `base_amount` olarak gönderin. Sorgu başarısız dönerse satışı durdurmayın, tek çekimle devam edin.
 
+## Banka hareketleri
+
+Banka hesabınızı ekleyin, hesaba giren ve çıkan paraları okuyun. Uçlar **Banka Hareketleri** modülünü ister; modül kapalıysa `ForbiddenError` döner.
+
+```python
+from odemehub.request import (
+    CreateBankAccount,
+    DeleteBankAccount,
+    RetrieveBankAccounts,
+    RetrieveBankTransactions,
+    UpdateBankAccount,
+)
+
+for bank in client.retrieve_banks().banks:
+    bank.id                             # enpara
+    [field.key for field in bank.fields]   # client_id, client_secret, access_token, refresh_token
+
+added = client.create_bank_account(CreateBankAccount(
+    provider="enpara",
+    name="Enpara Vadesiz",
+    iban="TR00 0000 0000 0000 0000 0000 00",   # boşluk ve küçük harf olabilir
+    settings={
+        "client_id": os.environ["ENPARA_CLIENT_ID"],
+        "client_secret": os.environ["ENPARA_CLIENT_SECRET"],
+        "access_token": os.environ["ENPARA_ACCESS_TOKEN"],
+        "refresh_token": os.environ["ENPARA_REFRESH_TOKEN"],
+    },
+))
+
+if added.bank_account is not None:
+    account_token = added.bank_account.token   # saklayın: hareketler bununla sorulur
+else:
+    added.result.message                # banka kimlik bilgilerini reddetti, bankanın sözüyle
+
+client.retrieve_bank_accounts()         # bütün hesaplar; RetrieveBankAccounts(tokens=[...]) ile seçilenler
+
+page = client.retrieve_bank_transactions(RetrieveBankTransactions(
+    bank_account_tokens=[account_token],
+    created_from="2026-10-20", created_to="2026-10-26",   # boş: son 7 gün
+))
+
+for movement in page.bank_transactions:
+    movement.booked_at                  # bankanın kayıt anı, UTC ISO 8601
+    movement.amount                     # işaretli: "22164.96" giren, "-40.00" çıkan
+    movement.description, movement.sender_description, movement.counterparty_iban
+
+page.pagination.has_more()              # sonraki sayfa için page=page.pagination.page + 1
+
+client.update_bank_account(UpdateBankAccount(token=account_token, name="Ana hesap"))
+client.delete_bank_account(DeleteBankAccount(token=account_token))
+```
+
+**Hesap eklemek.** Geçit hesabı eklemeden önce kimlik bilgileriyle bankaya bağlanıp IBAN'ı dener. Banka reddederse hata fırlatılmaz: `result.successful` `False`, `result.message` bankanın mesajı, `bank_account` `None` döner ve hesap eklenmez. `settings` anahtarları `retrieve_banks()`'in her banka için verdiği `fields` listesidir. IBAN boşlukları silinip büyük harfe çevrilir ve `TR` ile başlayan 26 karakter olmalıdır; aynı IBAN çalışma alanına bir kez eklenir. İkisi de 422 (`ValidationError`) ile reddedilir. Hesap eklenince son 7 günün hareketleri çekilir.
+
+**Hesap.** `BankAccount`: `token`, `provider`, `name`, `iban`, `synced_at` (son okuma, UTC; henüz okunmadıysa `None`), `last_error` (son okuma neden başarısız oldu, bankanın sözüyle; yoksa `None`), `created_at`. Hesap yalnızca token'ıyla anılır; sizdeki bir referansı yoktur. Kimlik bilgileri hiçbir yanıtta dönmez ve `repr()` çıktısına girmez.
+
+**Değiştirmek ve silmek.** `update_bank_account()` adı ve gönderilen kimlik bilgilerini değiştirir; gönderilmeyenler aynı kalır. Ne ad ne kimlik bilgisi gönderilirse 422 döner. Yeni kimlik bilgileri önce bankada denenir, banka reddederse hiçbir şey değişmez ve yanıt eklemedeki gibi `successful` `False` döner. Banka ve IBAN değişmez. `delete_bank_account()` hesabı ve ondan okunan bütün hareketleri siler; yanıtta yalnızca `bank_account_token` vardır. Bulunamayan token `NotFoundError` (404) alır.
+
+**Hareketler.** `retrieve_bank_transactions()` bir ya da birden çok hesabın (en çok 50) hareketlerini sayfa sayfa, eskiden yeniye verir; birden çok hesabın hareketleri bankanın kayıt anına göre iç içe sıralanır. Tarihler çalışma alanının saat diliminde, iki uç dahil en çok 7 gündür ve bankanın kayıt günüdür; verilmezse son 7 gün. Sayfa `page` (1'den), boyutu `per_page` (en çok 250; `page` verilip `per_page` verilmezse 50, hiçbiri verilmezse 250); yanıtta `pagination` (`page`, `per_page`, `total`, `last_page`) gelir. `BankTransaction`: `token`, `bank_account_token`, `booked_at`, `value_date` (`YYYY-MM-DD` ya da `None`), `amount`, `currency`, `balance_after`, `description`, `sender_description`, `counterparty_iban`, `counterparty_tax_number`.
+
+Hareketler bankadan değil geçidin sakladığı kayıtlardan okunur. Geçit her hesabı saatte bir (ve panelden **Şimdi Güncelle** ile) bankadan çeker; veri en çok bir saat geride olabilir. Banka hareketleri için webhook yoktur.
+
 ## Sorgulama
 
 Her kaynak tek bir `retrieve_*` metoduyla sorulur ve yanıt her zaman bir listedir (eskiden yeniye); eşleşen yoksa boş liste döner. Kayıt üç yoldan biriyle adlandırılır: `token`, sizdeki `reference` ya da açıldığı günler (`created_from` / `created_to`). Aralık en çok 7 gündür ve çalışma alanının saat dilimindedir; hiçbiri verilmezse son 7 gün.
@@ -398,7 +464,26 @@ for transaction in payments.payments:
 client.retrieve_payments()              # son 7 gün
 ```
 
-Aynısı `retrieve_orders()` (`RetrieveOrders`), `retrieve_subscriptions()` (`RetrieveSubscriptions`), `retrieve_payment_links()` (`RetrievePaymentLinks`), `retrieve_link_payments()` (`RetrieveLinkPayments`; `reference` geçidin verdiği `LINKPAY{n}`'dir) ve `retrieve_saved_cards()` (`RetrieveSavedCards`; `reference` müşterinin referansıdır) için de geçerlidir. Sipariş ve abonelik listelerinde her kayıt kendi `customer` bilgisini taşır.
+Aynısı `retrieve_orders()` (`RetrieveOrders`), `retrieve_subscriptions()` (`RetrieveSubscriptions`), `retrieve_payment_links()` (`RetrievePaymentLinks`), `retrieve_link_payments()` (`RetrieveLinkPayments`; `reference` geçidin verdiği `LINKPAY{n}`'dir) ve `retrieve_saved_cards()` (`RetrieveSavedCards`; `reference` müşterinin referansıdır) için de geçerlidir. Sipariş ve abonelik listelerinde her kayıt kendi `customer` bilgisini taşır. Banka hesapları ve hareketleri bu kalıbın dışındadır: `retrieve_bank_accounts()` token listesiyle ya da boş sorulur, `retrieve_bank_transactions()` hesap token'larıyla sorulur (bkz. [Banka hareketleri](#banka-hareketleri)).
+
+**Sayfalama.** Bütün sorgular (banka hareketleri dahil, banka hesapları hariç) her zaman sayfalıdır: liste yalnızca o sayfanın kayıtlarını taşır ve yanıtta her zaman `pagination` (`Pagination`: `page`, `per_page`, `total`, `last_page`, `has_more()`) gelir; sıralama değişmez. İsteğe bağlı `page` (1'den) ve `per_page` (en çok 250) filtrelerle birlikte verilebilir. `page` verilip `per_page` verilmezse sayfa 50 kayıttır; ikisi de verilmezse ilk 250 kayıt döner. Yoğun bir çalışma alanında 7 gün binlerce kayıt olabilir; `pagination.total` 250'yi aşıyorsa sayfa sayfa dolaşın.
+
+```python
+from odemehub.request import RetrievePayments
+
+page = 1
+
+while True:
+    answer = client.retrieve_payments(RetrievePayments(created_from="2026-09-26", created_to="2026-10-02", page=page, per_page=250))
+
+    for transaction in answer.payments:
+        ...
+
+    if answer.pagination is None or not answer.pagination.has_more():
+        break
+
+    page += 1
+```
 
 ## Webhook
 
@@ -464,7 +549,7 @@ Bütün hatalar `OdemehubError`'dan türer; tek bir `except` hepsini yakalar.
 | --- | --- | --- |
 | `AuthenticationError` | 401 | API anahtarı yanlış, imza tutmuyor ya da zaman damgası aralık dışında |
 | `ForbiddenError` | 403 | Çalışma alanı işlem yapamıyor (ödenmemiş bakiye) ya da ucun modülü kapalı; açtırmak için bizimle iletişime geçin |
-| `NotFoundError` | 404 | Güncellenmek, silinmek, iade ya da iptal edilmek istenen kayıt yok (sorgularda boş liste döner) |
+| `NotFoundError` | 404 | Token'la adlanan ve güncellenmek, silinmek, iade ya da iptal edilmek istenen kayıt yok (`update_*`, `delete_saved_card`, `delete_bank_account`, `refund_payment`, `cancel_payment`). Sorgular (token, referans ya da tarihle) bulunamayan kaydı boş liste olarak döner |
 | `ValidationError` | 422 | Alan hataları; `error.errors` noktalı alan adıyla (`transaction.amount`, `order.items.0.name`) |
 | `RateLimitError` | 429 | İstek sınırı; `error.retry_after` saniye |
 | `SignatureError` | — | Yanıtın ya da bildirimin imzası doğrulanamadı; içeriğe güvenmeyin |
@@ -494,6 +579,24 @@ Sınırlar çalışma alanı başına ve dakikalıktır:
 | 60 istek / dk | `secure-payment`, `regular-payment`, `refund-payment`, `cancel-payment`, `create-saved-card`, `delete-saved-card` (300'e ek olarak) |
 
 Aşıldığında 429 ve `RateLimitError` döner; `retry_after` kadar bekleyip aynı isteği yeniden gönderin.
+
+## 1.0.6'daki değişiklikler
+
+Eklenenler:
+
+- **Banka hareketleri:** yeni `retrieve_banks()`, `create_bank_account()`, `retrieve_bank_accounts()`, `update_bank_account()`, `delete_bank_account()` ve `retrieve_bank_transactions()`; istekler `RetrieveBanks`, `CreateBankAccount`, `RetrieveBankAccounts`, `UpdateBankAccount`, `DeleteBankAccount`, `RetrieveBankTransactions`, yanıtlar `BankList` (`Bank`, `BankField`), `BankAccountDetails`, `BankAccountList`, `BankAccount`, `DeletedBankAccount`, `BankTransactionList`, `BankTransaction` ve `Pagination`. Uçlar Banka Hareketleri modülünü ister. Bankanın reddettiği kimlik bilgisi hata değil, `result.successful` `False` olan yanıttır. `retrieve_bank_transactions()` her zaman sayfalıdır.
+- **Sorgularda sayfalama:** `RetrievePayments`, `RetrieveOrders`, `RetrieveSubscriptions`, `RetrievePaymentLinks`, `RetrieveLinkPayments` ve `RetrieveSavedCards` isteğe bağlı `page` ve `per_page` (en çok 250) alır (verilmezse gövdeye yazılmaz). Liste yanıtları (`PaymentList`, `OrderList`, `SubscriptionList`, `PaymentLinkList`, `LinkPaymentList`, `SavedCardList`) `pagination` (`Pagination`) taşır; geçit onu her zaman gönderir. `page` verilip `per_page` verilmezse sayfa 50, hiçbiri verilmezse 250 kayıttır; `retrieve_bank_transactions()` de aynı kuralla çalışır. Davranış değişikliği (SDK'nın değil, geçidin): sayfa istemeyen sorgu artık bütün kayıtları değil ilk 250'yi alır; daha fazlası olabilecekse `pagination.total`'a bakıp sayfa sayfa dolaşın.
+
+Değişenler:
+
+- **Dönüş adresleri:** `callback_url`, `success_url` ve `cancel_url` açıklamaları geçidin gerçek kuralını söyler: canlıda internetten erişilebilen https adresi, sandbox'ta localhost ve `.test` dahil her http/https adresi. `Item.image` http ya da https adresi olabilir.
+- **Belgelenen sınırlar:** bir sipariş, abonelik ya da link en çok 100 kalem taşır. `update_payment_link()` ve `update_bank_account()` değiştirilecek alan olmadan çağrılırsa 422 döner.
+- **Gönderim adresi:** `Customer.shipping_address` yalnızca sekiz kişi alanını alır; şirket alanları içeren gönderim adresi 422 alır (tip değişmedi).
+- **404 açıklaması:** `NotFoundError` ve hata tablosu 404'ün yalnızca token'la adlanan güncelleme, silme, iade ve iptalde döndüğünü, sorguların boş liste döndüğünü söyler. `LinkPaymentCustomer` açıklaması geçidin yalnızca fatura adresini döndüğünü söyler.
+
+Kırıcı değişiklik:
+
+- `RefundStatus` kaldırıldı; geçit iade durumu döndürmediği için hiçbir yanıtta kullanılmıyordu.
 
 ## 1.0.5'teki değişiklikler
 

@@ -10,7 +10,7 @@ There is one request per endpoint, named after it: ``create-order`` is
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar
@@ -69,7 +69,7 @@ class Address:
 
     The three company fields are read on the billing address only, and
     always together: the gateway turns down an address that names one of
-    them without the others.
+    them without the others, and a shipping address that names any of them.
     """
 
     firstname: str | None = None
@@ -80,7 +80,8 @@ class Address:
     district: str | None = None
     province: str | None = None
     country: str | None = None
-    #: The company the customer is billed as. Billing address only.
+    #: The company the customer is billed as. Billing address only: a
+    #: shipping address that carries any of the three is turned down.
     company_title: str | None = None
     tax_number: str | None = None
     tax_office: str | None = None
@@ -119,6 +120,8 @@ class Customer:
     #: The key the merchant keeps this customer under in its own system.
     reference: str | None = None
     billing_address: Address | None = None
+    #: The eight person fields only; the gateway turns down a shipping
+    #: address that carries the company fields.
     shipping_address: Address | None = None
 
     def to_body(self) -> Body:
@@ -214,7 +217,7 @@ class Item:
     tax_rate: str | None = None
     #: The merchant's own key for what is on the line, if it has one.
     reference: str | None = None
-    #: The https address of the picture shown beside the line at checkout.
+    #: The http or https address of the picture shown beside the line at checkout.
     image: str | None = None
     #: Whether the line is also kept on the team's product list: written
     #: there under its reference, or the product with that reference
@@ -310,7 +313,8 @@ class SecurePayment(Payment):
     endpoint: ClassVar[str] = "secure-payment"
 
     #: Where the customer's browser is posted back to once the bank has
-    #: answered. An https address reachable from the internet.
+    #: answered. Live, an https address reachable from the internet; on the
+    #: sandbox any http or https address, localhost and ``.test`` included.
     callback_url: str
 
     def to_body(self) -> Body:
@@ -414,6 +418,10 @@ class Retrieve(Message):
     none of these, it is the last seven days up to today. The answer is
     always a list, oldest first, and an empty one when nothing matches.
     Nothing is changed by asking.
+
+    The answer always comes a page at a time and says which page it is.
+    Naming neither a page nor how many records a page holds brings the
+    first 250; past that, ask page after page.
     """
 
     #: The field the merchant's own reference travels in.
@@ -427,6 +435,11 @@ class Retrieve(Message):
     created_from: str | None = None
     #: The last day, as ``YYYY-MM-DD``, at most six days after the first.
     created_to: str | None = None
+    #: The page, from 1. Left out, the first.
+    page: int | None = None
+    #: How many records a page holds, at most 250. Left out, 50 when ``page``
+    #: is given and 250 when neither is.
+    per_page: int | None = None
 
     def to_body(self) -> Body:
         return _said({
@@ -434,6 +447,8 @@ class Retrieve(Message):
             self.reference_field: self.reference,
             "created_from": self.created_from,
             "created_to": self.created_to,
+            "page": self.page,
+            "per_page": self.per_page,
         })
 
 
@@ -527,14 +542,17 @@ class CheckoutMessage(Message):
     #: least one digit; it need not be unique.
     reference: str | None = None
     #: Where the customer's browser is posted back to once it is paid, with
-    #: the payment's token. An https address reachable from the internet.
+    #: the payment's token. Live, an https address reachable from the
+    #: internet; on the sandbox any http or https address, localhost and
+    #: ``.test`` included.
     success_url: str | None = None
-    #: What it is for; at least one line when opening. Sent on a change, they
-    #: replace every line there was.
+    #: What it is for; one to a hundred lines when opening. Sent on a change,
+    #: they replace every line there was.
     items: Sequence[Item] | None = None
     #: Who it is for, as far as it is known.
     customer: Customer | None = None
-    #: Where the customer goes if they turn back without paying; shown as a link on the checkout page.
+    #: Where the customer goes if they turn back without paying; shown as a
+    #: link on the checkout page. Held to the same rule as ``success_url``.
     cancel_url: str | None = None
     description: str | None = None
     #: Left out, the gateway takes the lira.
@@ -766,8 +784,8 @@ class PaymentLinkMessage(Message):
     expires_at: str | None = None
     #: Whether the link takes payments. Left out, it does.
     is_active: bool | None = None
-    #: What a link of lines is for. Sent on a change, they replace every line
-    #: there was.
+    #: What a link of lines is for, at most a hundred lines. Sent on a change,
+    #: they replace every line there was.
     items: Sequence[Item] | None = None
 
     def _details(self) -> Body:
@@ -795,8 +813,8 @@ class CreatePaymentLink(PaymentLinkMessage):
     """
     A payment link opened. Every opening opens a new link under a new token,
     even under a reference sent before; nothing already there is written
-    over. Keep the token the answer comes back with. A link of lines needs at
-    least one line; a link whose amount the payer picks needs none.
+    over. Keep the token the answer comes back with. A link of lines needs
+    one to a hundred lines; a link whose amount the payer picks needs none.
     """
 
     endpoint: ClassVar[str] = "create-payment-link"
@@ -813,7 +831,8 @@ class CreatePaymentLink(PaymentLinkMessage):
 class UpdatePaymentLink(PaymentLinkMessage):
     """
     A change to a payment link, named by its token in the address and again
-    in the body. Only what is sent is written; lines sent replace the lines
+    in the body. Only what is sent is written, and a change that sends
+    nothing to write is turned down; lines sent replace the lines
     there were. A link left as, or turned back into, a link of lines has to
     have lines, so one turned back from a payer-picked amount sends them. A
     link whose last day has gone by is switched on again by a new day alone.
@@ -917,3 +936,164 @@ class DeleteSavedCard(Message):
 
     def to_body(self) -> Body:
         return {"token": self.token}
+
+
+# Bank accounts -------------------------------------------------------------
+
+
+@dataclass(frozen=True, kw_only=True)
+class RetrieveBanks(Message):
+    """
+    The banks whose accounts may be added for Banka Hareketleri, each with
+    the credentials it asks for. Nothing goes in the body.
+    """
+
+    endpoint: ClassVar[str] = "retrieve-banks"
+
+    def to_body(self) -> Body:
+        return {}
+
+
+@dataclass(frozen=True, kw_only=True)
+class CreateBankAccount(Message):
+    """
+    A bank account whose movements are to be read. The gateway first asks
+    the bank whether the credentials read the account with the IBAN; one
+    the bank turns down is not added, and the answer says why. An added
+    account is named by the token the gateway gives it from then on, and
+    its last seven days are read once it is added.
+
+    The credentials travel no further than the request body and are kept
+    out of ``repr()``; no answer ever carries them back.
+    """
+
+    endpoint: ClassVar[str] = "create-bank-account"
+
+    #: The bank's id, as ``retrieve_banks()`` lists it, e.g. ``enpara``.
+    provider: str
+    #: What the account is called in the panel and the listing.
+    name: str
+    #: The account's IBAN; spaces and small letters are fine. An IBAN is
+    #: added once per team.
+    iban: str
+    #: Every credential the bank asks for, keyed the way ``retrieve_banks()``
+    #: lists them.
+    settings: Mapping[str, str] = field(repr=False)
+
+    def to_body(self) -> Body:
+        return {
+            "bank_account": {
+                "provider": self.provider,
+                "name": self.name,
+                "iban": self.iban,
+                "settings": dict(self.settings),
+            },
+        }
+
+
+@dataclass(frozen=True, kw_only=True)
+class RetrieveBankAccounts(Message):
+    """
+    Bank accounts asked after: the ones whose tokens are given, or every
+    account of the team's when none are. A token that is not the team's
+    finds nothing. The answer is always a list, oldest first.
+    """
+
+    endpoint: ClassVar[str] = "retrieve-bank-accounts"
+
+    #: The accounts' tokens, at most fifty. Left out, every account.
+    tokens: Sequence[str] | None = None
+
+    def to_body(self) -> Body:
+        return _said({"tokens": None if self.tokens is None else list(self.tokens)})
+
+
+@dataclass(frozen=True, kw_only=True)
+class UpdateBankAccount(Message):
+    """
+    A change to a bank account, named by its token in the address and again
+    in the body: its name, and the credentials that are sent, the rest
+    staying as they are. New credentials are tried against the bank first
+    and kept only if it lets them read the account; one it turns down leaves
+    everything as it was. Its bank and its IBAN do not change. A change
+    that sends neither a name nor a credential is turned down.
+    """
+
+    endpoint: ClassVar[str] = "update-bank-account"
+
+    #: The account's token in the gateway.
+    token: str
+    name: str | None = None
+    #: Only the credentials that change, keyed the way ``retrieve_banks()``
+    #: lists them.
+    settings: Mapping[str, str] | None = field(default=None, repr=False)
+
+    def path(self) -> str:
+        return f"{self.endpoint}/{self.token}"
+
+    def to_body(self) -> Body:
+        return {
+            "token": self.token,
+            "bank_account": _said({
+                "name": self.name,
+                "settings": None if self.settings is None else dict(self.settings),
+            }),
+        }
+
+
+@dataclass(frozen=True, kw_only=True)
+class DeleteBankAccount(Message):
+    """
+    Removing a bank account, with every movement read off it. Its
+    credentials go too, unless another of the team's accounts is read with
+    them.
+    """
+
+    endpoint: ClassVar[str] = "delete-bank-account"
+
+    #: The account's token in the gateway.
+    token: str
+
+    def path(self) -> str:
+        return f"{self.endpoint}/{self.token}"
+
+    def to_body(self) -> Body:
+        return {"token": self.token}
+
+
+@dataclass(frozen=True, kw_only=True)
+class RetrieveBankTransactions(Message):
+    """
+    The movements on one or more bank accounts, named by their tokens,
+    booked between two days as ``YYYY-MM-DD`` in the team's own timezone,
+    both included and at most seven days apart; the last seven when none
+    are given. The days are the bank's: the day it booked the movement, not
+    the day the gateway read it. The answer comes a page at a time, oldest
+    first, the accounts' movements woven together.
+
+    They are read from what the gateway keeps, not from the bank; it reads
+    every account from the bank within the hour.
+    """
+
+    endpoint: ClassVar[str] = "retrieve-bank-transactions"
+
+    #: The accounts' tokens, one to fifty.
+    bank_account_tokens: Sequence[str]
+    #: The first day, as ``YYYY-MM-DD``. Given together with ``created_to``.
+    created_from: str | None = None
+    #: The last day, as ``YYYY-MM-DD``, at most six days after the first.
+    created_to: str | None = None
+    #: The page, from 1. Left out, the first.
+    page: int | None = None
+    #: How many movements a page holds, at most 250. Left out, 50 when
+    #: ``page`` is given and 250 when neither is.
+    per_page: int | None = None
+
+    def to_body(self) -> Body:
+        return _said({
+            "bank_account_tokens": list(self.bank_account_tokens),
+            "created_from": self.created_from,
+            "created_to": self.created_to,
+            "page": self.page,
+            "per_page": self.per_page,
+        })

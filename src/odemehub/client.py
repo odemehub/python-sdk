@@ -255,6 +255,46 @@ class Client:
         """Let go of a kept card, at the provider and here."""
         return response.DeletedSavedCard.from_body(self._send(saved_card))
 
+    # Bank accounts ---------------------------------------------------------
+
+    def retrieve_banks(self, banks: request.RetrieveBanks | None = None) -> response.BankList:
+        """The banks whose accounts may be added, each with the credentials it asks for."""
+        return response.BankList.from_body(self._send(banks or request.RetrieveBanks()))
+
+    def create_bank_account(self, bank_account: request.CreateBankAccount) -> response.BankAccountDetails:
+        """
+        Add a bank account whose movements are to be read, once the bank
+        lets the credentials read it. A bank that turns them down is an
+        outcome like any other and comes back with ``result.successful``
+        False rather than being raised.
+        """
+        return response.BankAccountDetails.from_body(self._send(bank_account))
+
+    def retrieve_bank_accounts(self, bank_accounts: request.RetrieveBankAccounts | None = None) -> response.BankAccountList:
+        """Bank accounts as they stand — by token, or every account of the team's when none is named."""
+        return response.BankAccountList.from_body(self._send(bank_accounts or request.RetrieveBankAccounts()))
+
+    def update_bank_account(self, bank_account: request.UpdateBankAccount) -> response.BankAccountDetails:
+        """
+        Rename a bank account, or replace its credentials. New credentials
+        are tried against the bank first; one it turns down comes back with
+        ``result.successful`` False and changes nothing.
+        """
+        return response.BankAccountDetails.from_body(self._send(bank_account))
+
+    def delete_bank_account(self, bank_account: request.DeleteBankAccount) -> response.DeletedBankAccount:
+        """Remove a bank account and every movement read off it."""
+        return response.DeletedBankAccount.from_body(self._send(bank_account))
+
+    def retrieve_bank_transactions(self, bank_transactions: request.RetrieveBankTransactions) -> response.BankTransactionList:
+        """
+        The movements on bank accounts, by the accounts' tokens, over seven
+        days at most — the last seven when none are named — a page at a
+        time. They are read from what the gateway keeps, which it reads from
+        the bank within the hour.
+        """
+        return response.BankTransactionList.from_body(self._send(bank_transactions))
+
     # Webhooks --------------------------------------------------------------
 
     def webhook(self, method: str, path: str, payload: str | bytes, timestamp: str | None, signature: str | None) -> response.Webhook:

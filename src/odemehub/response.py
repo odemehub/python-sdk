@@ -122,6 +122,33 @@ class Result:
 
 
 @dataclass(frozen=True, kw_only=True)
+class Pagination:
+    """Which page of a longer answer this is, and how many there are."""
+
+    #: The page, from 1.
+    page: int
+    #: How many records a page holds.
+    per_page: int
+    #: How many records there are across every page.
+    total: int
+    #: The last page there is; 1 when there is nothing.
+    last_page: int
+
+    def has_more(self) -> bool:
+        """Whether another page follows this one."""
+        return self.page < self.last_page
+
+    @classmethod
+    def from_body(cls, pagination: Body) -> Pagination:
+        return cls(
+            page=_integer(pagination.get("page")) or 1,
+            per_page=_integer(pagination.get("per_page")),
+            total=_integer(pagination.get("total")),
+            last_page=_integer(pagination.get("last_page")) or 1,
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
 class Conversion:
     """
     What reached the card, for a payment the merchant's conversion rules
@@ -657,6 +684,8 @@ class PaymentList:
     #: The last day listed, the same way.
     created_to: str | None
     payments: list[Transaction]
+    #: Which page this is. The gateway always sends it; None only when an answer comes without it.
+    pagination: Pagination | None = None
 
     def successful(self) -> list[Transaction]:
         """The payments that went through."""
@@ -669,6 +698,7 @@ class PaymentList:
             created_from=_said(body.get("created_from")),
             created_to=_said(body.get("created_to")),
             payments=[Transaction.from_body(_object(entry)) for entry in _list(body.get("payments"))],
+            pagination=Pagination.from_body(body["pagination"]) if isinstance(body.get("pagination"), dict) else None,
         )
 
 
@@ -906,6 +936,8 @@ class OrderList:
     #: The last day listed, the same way.
     created_to: str | None
     orders: list[Order]
+    #: Which page this is. The gateway always sends it; None only when an answer comes without it.
+    pagination: Pagination | None = None
 
     @classmethod
     def from_body(cls, body: Body) -> OrderList:
@@ -914,6 +946,7 @@ class OrderList:
             created_from=_said(body.get("created_from")),
             created_to=_said(body.get("created_to")),
             orders=[Order.from_body(_object(entry)) for entry in _list(body.get("orders"))],
+            pagination=Pagination.from_body(body["pagination"]) if isinstance(body.get("pagination"), dict) else None,
         )
 
 
@@ -1049,6 +1082,8 @@ class PaymentLinkList:
     #: The last day listed, the same way.
     created_to: str | None
     payment_links: list[PaymentLink]
+    #: Which page this is. The gateway always sends it; None only when an answer comes without it.
+    pagination: Pagination | None = None
 
     @classmethod
     def from_body(cls, body: Body) -> PaymentLinkList:
@@ -1057,6 +1092,7 @@ class PaymentLinkList:
             created_from=_said(body.get("created_from")),
             created_to=_said(body.get("created_to")),
             payment_links=[PaymentLink.from_body(_object(entry)) for entry in _list(body.get("payment_links"))],
+            pagination=Pagination.from_body(body["pagination"]) if isinstance(body.get("pagination"), dict) else None,
         )
 
 
@@ -1082,7 +1118,8 @@ class LinkPaymentCustomer:
     """
     Who paid at a link, as they billed themselves on the checkout page. A
     link has no customer of its own, so there is no reference: the payer is
-    nobody the team keeps.
+    nobody the team keeps, and the gateway answers with the billing address
+    alone.
     """
 
     billing_address: Address
@@ -1177,6 +1214,8 @@ class LinkPaymentList:
     #: The last day listed, the same way.
     created_to: str | None
     link_payments: list[LinkPayment]
+    #: Which page this is. The gateway always sends it; None only when an answer comes without it.
+    pagination: Pagination | None = None
 
     def paid(self) -> list[LinkPayment]:
         """The payments that went through."""
@@ -1189,6 +1228,7 @@ class LinkPaymentList:
             created_from=_said(body.get("created_from")),
             created_to=_said(body.get("created_to")),
             link_payments=[LinkPayment.from_body(_object(entry)) for entry in _list(body.get("link_payments"))],
+            pagination=Pagination.from_body(body["pagination"]) if isinstance(body.get("pagination"), dict) else None,
         )
 
 
@@ -1388,6 +1428,8 @@ class SubscriptionList:
     #: The last day listed, the same way.
     created_to: str | None
     subscriptions: list[Subscription]
+    #: Which page this is. The gateway always sends it; None only when an answer comes without it.
+    pagination: Pagination | None = None
 
     @classmethod
     def from_body(cls, body: Body) -> SubscriptionList:
@@ -1396,6 +1438,7 @@ class SubscriptionList:
             created_from=_said(body.get("created_from")),
             created_to=_said(body.get("created_to")),
             subscriptions=[Subscription.from_body(_object(entry)) for entry in _list(body.get("subscriptions"))],
+            pagination=Pagination.from_body(body["pagination"]) if isinstance(body.get("pagination"), dict) else None,
         )
 
 
@@ -1437,6 +1480,8 @@ class SavedCardList:
     #: The last day listed, the same way.
     created_to: str | None
     saved_cards: list[SavedCard]
+    #: Which page this is. The gateway always sends it; None only when an answer comes without it.
+    pagination: Pagination | None = None
 
     def default(self) -> SavedCard | None:
         """The card the customer pays with unless they say otherwise, when the cards were asked for by the customer's reference."""
@@ -1449,6 +1494,7 @@ class SavedCardList:
             created_from=_said(body.get("created_from")),
             created_to=_said(body.get("created_to")),
             saved_cards=[SavedCard.from_body(_object(entry)) for entry in _list(body.get("saved_cards"))],
+            pagination=Pagination.from_body(body["pagination"]) if isinstance(body.get("pagination"), dict) else None,
         )
 
 
@@ -1471,4 +1517,218 @@ class DeletedSavedCard:
             result=Result.from_body(body),
             saved_card_token=_string(_object(body.get("saved_card")).get("token")),
             customer=SavedCardCustomer.from_body(_object(body.get("customer"))),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class BankField:
+    """One credential a bank asks for before its accounts may be read."""
+
+    #: The key it is sent under in ``settings``.
+    key: str
+    required: bool
+    #: What the bank calls it.
+    label: str
+
+    @classmethod
+    def from_body(cls, bank_field: Body) -> BankField:
+        return cls(
+            key=_string(bank_field.get("key")),
+            required=_boolean(bank_field.get("required")),
+            label=_string(bank_field.get("label")),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class Bank:
+    """A bank whose accounts may be added, and the credentials it asks for."""
+
+    #: The bank's id, which ``CreateBankAccount.provider`` names it by.
+    id: str
+    title: str
+    fields: list[BankField]
+
+    @classmethod
+    def from_body(cls, bank: Body) -> Bank:
+        return cls(
+            id=_string(bank.get("id")),
+            title=_string(bank.get("title")),
+            fields=[BankField.from_body(_object(entry)) for entry in _list(bank.get("fields"))],
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class BankList:
+    """The banks whose accounts may be added."""
+
+    result: Result
+    banks: list[Bank]
+
+    @classmethod
+    def from_body(cls, body: Body) -> BankList:
+        return cls(
+            result=Result.from_body(body),
+            banks=[Bank.from_body(_object(entry)) for entry in _list(body.get("banks"))],
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class BankAccount:
+    """
+    A bank account whose movements the gateway reads, as it shows it: never
+    with the credentials it is read with.
+    """
+
+    #: The account's token in the gateway, which its movements are asked for by.
+    token: str
+    #: The bank's id, as ``retrieve_banks()`` lists it.
+    provider: str
+    name: str
+    iban: str
+    #: When the gateway last read the account from the bank, as an ISO 8601
+    #: time in UTC; None until it has.
+    synced_at: str | None
+    #: Why the last reading failed, in the bank's words; None when it did not.
+    last_error: str | None
+    created_at: str | None
+
+    @classmethod
+    def from_body(cls, bank_account: Body) -> BankAccount:
+        return cls(
+            token=_string(bank_account.get("token")),
+            provider=_string(bank_account.get("provider")),
+            name=_string(bank_account.get("name")),
+            iban=_string(bank_account.get("iban")),
+            synced_at=_said(bank_account.get("synced_at")),
+            last_error=_said(bank_account.get("last_error")),
+            created_at=_said(bank_account.get("created_at")),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class BankAccountDetails:
+    """
+    A bank account, as the gateway answers when it is added or changed. A
+    bank that turns the credentials down is an outcome like any other: it
+    arrives here with ``result.successful`` False, the bank's words in
+    ``result.message``, and nothing added or changed.
+    """
+
+    result: Result
+    #: The account as it now stands, or None when the bank turned the credentials down.
+    bank_account: BankAccount | None
+
+    @classmethod
+    def from_body(cls, body: Body) -> BankAccountDetails:
+        bank_account = body.get("bank_account")
+
+        return cls(
+            result=Result.from_body(body),
+            bank_account=BankAccount.from_body(bank_account) if isinstance(bank_account, dict) else None,
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class BankAccountList:
+    """Bank accounts asked after. The answer is always a list, oldest first, and an empty one when nothing matched."""
+
+    result: Result
+    bank_accounts: list[BankAccount]
+
+    @classmethod
+    def from_body(cls, body: Body) -> BankAccountList:
+        return cls(
+            result=Result.from_body(body),
+            bank_accounts=[BankAccount.from_body(_object(entry)) for entry in _list(body.get("bank_accounts"))],
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class DeletedBankAccount:
+    """A bank account removed, with every movement read off it."""
+
+    result: Result
+    #: The token the account had.
+    bank_account_token: str
+
+    @classmethod
+    def from_body(cls, body: Body) -> DeletedBankAccount:
+        return cls(
+            result=Result.from_body(body),
+            bank_account_token=_string(_object(body.get("bank_account")).get("token")),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class BankTransaction:
+    """
+    A movement on a bank account, as the bank booked it. The amount is
+    signed: money coming in is above zero, money going out below it.
+    """
+
+    #: The movement's token in the gateway.
+    token: str
+    #: The account it was booked on.
+    bank_account_token: str
+    #: When the bank booked it, as an ISO 8601 time in UTC.
+    booked_at: str
+    #: The day it counts from at the bank, as ``YYYY-MM-DD``, when the bank says.
+    value_date: str | None
+    #: Signed, with the kurus behind a point: '22164.96' in, '-40.00' out.
+    amount: str
+    currency: Currency | str
+    #: What the account held after it, the same way, when the bank says.
+    balance_after: str | None
+    #: The bank's own description of it.
+    description: str | None
+    #: What the sender wrote with it.
+    sender_description: str | None
+    #: The other side's IBAN, when the bank says.
+    counterparty_iban: str | None
+    #: The other side's tax or identity number, when the bank says.
+    counterparty_tax_number: str | None
+
+    @classmethod
+    def from_body(cls, bank_transaction: Body) -> BankTransaction:
+        return cls(
+            token=_string(bank_transaction.get("token")),
+            bank_account_token=_string(bank_transaction.get("bank_account_token")),
+            booked_at=_string(bank_transaction.get("booked_at")),
+            value_date=_said(bank_transaction.get("value_date")),
+            amount=_string(bank_transaction.get("amount")),
+            currency=_known(Currency, bank_transaction.get("currency")),
+            balance_after=_said(bank_transaction.get("balance_after")),
+            description=_said(bank_transaction.get("description")),
+            sender_description=_said(bank_transaction.get("sender_description")),
+            counterparty_iban=_said(bank_transaction.get("counterparty_iban")),
+            counterparty_tax_number=_said(bank_transaction.get("counterparty_tax_number")),
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class BankTransactionList:
+    """
+    Movements asked after, a page at a time, oldest first by when the bank
+    booked them, and an empty page when nothing matched. The days are the
+    ones the gateway used: the ones asked for, or the last seven when none
+    were.
+    """
+
+    result: Result
+    #: The first day listed, ``YYYY-MM-DD`` in the team's timezone.
+    created_from: str | None
+    #: The last day listed, the same way.
+    created_to: str | None
+    #: Which page this is; ask for ``page + 1`` while ``has_more()``.
+    pagination: Pagination
+    bank_transactions: list[BankTransaction]
+
+    @classmethod
+    def from_body(cls, body: Body) -> BankTransactionList:
+        return cls(
+            result=Result.from_body(body),
+            created_from=_said(body.get("created_from")),
+            created_to=_said(body.get("created_to")),
+            pagination=Pagination.from_body(_object(body.get("pagination"))),
+            bank_transactions=[BankTransaction.from_body(_object(entry)) for entry in _list(body.get("bank_transactions"))],
         )
