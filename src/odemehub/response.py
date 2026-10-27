@@ -195,6 +195,32 @@ class Discount:
 
 
 @dataclass(frozen=True, kw_only=True)
+class MaxInstallments:
+    """
+    The most instalments the checkout page offers, apart for individual and
+    commercial cards: 1 for a single payment only, None for no limit on that
+    kind of card.
+    """
+
+    #: The most instalments on an individual card; None for no limit.
+    individual: int | None
+    #: The most instalments on a commercial card; None for no limit.
+    commercial: int | None
+
+    @classmethod
+    def from_body(cls, max_installments: Body) -> MaxInstallments:
+        return cls(
+            individual=_optional_integer(max_installments.get("individual")),
+            commercial=_optional_integer(max_installments.get("commercial")),
+        )
+
+
+def _max_installments(value: Any) -> MaxInstallments | None:
+    """The instalment limit an answer carries, or None where it carries none."""
+    return MaxInstallments.from_body(value) if isinstance(value, dict) else None
+
+
+@dataclass(frozen=True, kw_only=True)
 class Address:
     """
     An address as the gateway answers it: only the fields that were said.
@@ -859,6 +885,9 @@ class Order:
     transaction: TransactionReference | None
     #: Who the order is for; None while nobody has said.
     customer: NamedCustomer | None
+    #: The most instalments the checkout page offers, for individual and
+    #: commercial cards apart; None when no limit was set.
+    max_installments: MaxInstallments | None = None
 
     def is_paid(self) -> bool:
         """Whether the order has been paid."""
@@ -893,6 +922,7 @@ class Order:
             checkout_url=_said(order.get("checkout_url")),
             transaction=TransactionReference.from_body(transaction) if isinstance(transaction, dict) else None,
             customer=NamedCustomer.from_body(customer) if isinstance(customer, dict) else None,
+            max_installments=_max_installments(order.get("max_installments")),
         )
 
 
@@ -1011,6 +1041,9 @@ class PaymentLink:
     #: How many attempts have been made on the link in all, however many are
     #: listed; None but on a listed link.
     transactions_count: int | None = None
+    #: The most instalments the checkout page offers, for individual and
+    #: commercial cards apart; None when no limit was set.
+    max_installments: MaxInstallments | None = None
 
     def successful(self) -> list[Transaction]:
         """The listed attempts that went through."""
@@ -1043,6 +1076,7 @@ class PaymentLink:
             created_at=_said(link.get("created_at")),
             transactions=[Transaction.from_body(_object(transaction)) for transaction in _list(link.get("transactions"))],
             transactions_count=_optional_integer(link.get("transactions_count")),
+            max_installments=_max_installments(link.get("max_installments")),
         )
 
 
@@ -1319,6 +1353,9 @@ class Subscription:
     checkout_url: str | None
     #: Who the subscription is for.
     customer: NamedCustomer | None
+    #: The most instalments the checkout page offers, for individual and
+    #: commercial cards apart; None when no limit was set.
+    max_installments: MaxInstallments | None = None
 
     def is_active(self) -> bool:
         """
@@ -1384,6 +1421,7 @@ class Subscription:
             created_at=_said(subscription.get("created_at")),
             checkout_url=_said(subscription.get("checkout_url")),
             customer=NamedCustomer.from_body(customer) if isinstance(customer, dict) else None,
+            max_installments=_max_installments(subscription.get("max_installments")),
         )
 
 

@@ -236,6 +236,28 @@ class Item:
         })
 
 
+@dataclass(frozen=True, kw_only=True)
+class MaxInstallments:
+    """
+    The most instalments the checkout page offers, apart for individual and
+    commercial cards: 1 to 12 each, 1 for a single payment only, ``None``
+    for no limit on that kind of card. A limit is always sent whole; sent on
+    a change it takes the place of the one there was, and
+    ``MaxInstallments()`` — both ``None`` — lifts it.
+    """
+
+    #: The most instalments on an individual card; None for no limit.
+    individual: int | None = None
+    #: The most instalments on a commercial card; None for no limit.
+    commercial: int | None = None
+
+    def to_body(self) -> Body:
+        return {
+            "individual": self.individual,
+            "commercial": self.commercial,
+        }
+
+
 # Payments ------------------------------------------------------------------
 
 
@@ -574,6 +596,10 @@ class CheckoutMessage(Message):
     #: an order once it is paid, on a subscription whenever where it stands
     #: changes.
     emails_customer: bool | None = None
+    #: The most instalments the checkout page offers, for individual and
+    #: commercial cards apart. Left out, the team's own installment settings
+    #: hold; sent on a change, it takes the place of the limit there was.
+    max_installments: MaxInstallments | None = None
 
     def _details(self) -> Body:
         return _said({
@@ -586,6 +612,7 @@ class CheckoutMessage(Message):
             "requires_shipping": self.requires_shipping,
             "locks_customer": self.locks_customer,
             "emails_customer": self.emails_customer,
+            "max_installments": None if self.max_installments is None else self.max_installments.to_body(),
             "items": None if self.items is None else [item.to_body() for item in self.items],
         })
 
@@ -779,6 +806,10 @@ class PaymentLinkMessage(Message):
     #: checkout page, once their payment goes through. Left out on opening,
     #: they are not.
     emails_customer: bool | None = None
+    #: The most instalments the checkout page offers, for individual and
+    #: commercial cards apart. Left out, the team's own installment settings
+    #: hold; sent on a change, it takes the place of the limit there was.
+    max_installments: MaxInstallments | None = None
     #: The last day the link may be paid, as ``YYYY-MM-DD`` in the team's
     #: timezone; today or later. Left out, it never runs out.
     expires_at: str | None = None
@@ -802,6 +833,7 @@ class PaymentLinkMessage(Message):
             "currency_type": _value(self.currency_type),
             "currencies": None if self.currencies is None else [_value(currency) for currency in self.currencies],
             "emails_customer": self.emails_customer,
+            "max_installments": None if self.max_installments is None else self.max_installments.to_body(),
             "expires_at": self.expires_at,
             "is_active": self.is_active,
             "items": None if self.items is None else [item.to_body() for item in self.items],

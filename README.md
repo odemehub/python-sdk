@@ -162,7 +162,7 @@ Canlıda `callback_url`, `success_url` ve `cancel_url` internetten erişilebilen
 Kart sizde sorulmaz. Siparişi açarsınız, geçit kendi ödeme sayfasının adresini döner, müşteri orada öder. Tutar gönderilmez: geçit kalemleri ve ödeyenin panelinizdeki listeden seçtiği gönderim yöntemini toplar. Birim tutarlar KDV dahildir.
 
 ```python
-from odemehub.request import CreateOrder, Item
+from odemehub.request import CreateOrder, Item, MaxInstallments
 
 answer = client.create_order(CreateOrder(
     reference="SIP-10233",
@@ -174,6 +174,7 @@ answer = client.create_order(CreateOrder(
     requires_shipping=True,              # ödeyen adresini ve gönderim yöntemini sayfada seçer
     cancel_url="https://magazam.com/sepet",
     emails_customer=True,                # ödeme tamamlanınca fatura adresindeki e-postaya bilgilendirme gider
+    max_installments=MaxInstallments(individual=6, commercial=1),  # bireysel kartta en çok 6 taksit, ticari kartta tek çekim
 ))
 
 answer.order.checkout_url      # müşteriyi buraya gönderin
@@ -184,7 +185,9 @@ Müşteri istediğiniz kadarıyla verilir: yalnız `reference`, fatura adresi (`
 
 **Müşteri kilidi.** `locks_customer=True` gönderilirse ödeme sayfası müşteri bilgisi sormaz; gönderdiğiniz müşteriyi değiştirilemez şekilde gösterir ve ödemeyi onunla alır. Bu durumda fatura adresi eksiksiz olmalıdır; `requires_shipping=True` ise gönderim adresi de (gönderilmezse fatura adresi kullanılır). Eksik alan varsa geçit `ValidationError` ile reddeder.
 
-Yanıttaki `order` siparişi bütünüyle taşır (müşteri hem `answer.customer`'da hem `answer.order.customer`'dadır): `token`, `reference`, `description`, `payment_provider_token`, `status` (`open` / `paid`), `requires_shipping`, `locks_customer`, `emails_customer`, `items`, seçilen `shipping_method`, `subtotal`, `shipping_amount`, `tax_amount`, `amount`, `currency`, `discount`, `is_test`, `created_at`, `checkout_url` (ödenince `None`), ödeyen işlem `transaction` (açıkken `None`) ve `customer`.
+**Taksit sınırı.** `max_installments` ödeme sayfasında sunulacak en yüksek taksit sayısını bireysel (`individual`) ve ticari (`commercial`) kart için ayrı ayrı sınırlar: her biri 1–12, `1` yalnızca tek çekim, `None` o kart tipinde sınır yok. Sipariş, abonelik ve ödeme linkinde (`Create*` / `Update*`) aynı şekilde gönderilir. Güncellemede gönderilen sınır öncekinin yerini alır, gönderilmezse değişmez; `MaxInstallments()` (ikisi de `None`) sınırı kaldırır. Yanıttaki `max_installments` (`response.MaxInstallments`; `Order`, `Subscription`, `PaymentLink`) sınır yoksa `None`'dır.
+
+Yanıttaki `order` siparişi bütünüyle taşır (müşteri hem `answer.customer`'da hem `answer.order.customer`'dadır): `token`, `reference`, `description`, `payment_provider_token`, `status` (`open` / `paid`), `requires_shipping`, `locks_customer`, `emails_customer`, `max_installments`, `items`, seçilen `shipping_method`, `subtotal`, `shipping_amount`, `tax_amount`, `amount`, `currency`, `discount`, `is_test`, `created_at`, `checkout_url` (ödenince `None`), ödeyen işlem `transaction` (açıkken `None`) ve `customer`.
 
 **Kupon.** API'de kupon alanı yoktur; ödeyen kodu ödeme sayfasında girer. Kupon kullanıldıysa yanıtta `discount` (`Discount`: `code`, `amount`) gelir, yoksa `None`'dır. Siparişin `subtotal`, `tax_amount` ve `amount` değerleri indirim düşülmüş hâlidir; kupon gönderim ücretinden düşülmez.
 
@@ -579,6 +582,12 @@ Sınırlar çalışma alanı başına ve dakikalıktır:
 | 60 istek / dk | `secure-payment`, `regular-payment`, `refund-payment`, `cancel-payment`, `create-saved-card`, `delete-saved-card` (300'e ek olarak) |
 
 Aşıldığında 429 ve `RateLimitError` döner; `retry_after` kadar bekleyip aynı isteği yeniden gönderin.
+
+## 1.0.7'deki değişiklikler
+
+Eklenenler:
+
+- **Taksit sınırı:** `MaxInstallments` (`individual`, `commercial`); sipariş, abonelik ve ödeme linki oluşturma/güncelleme isteklerinde `max_installments`; `Order`, `Subscription` ve `PaymentLink` yanıtlarında `max_installments` (yoksa `None`). Güncellemede `MaxInstallments()` sınırı kaldırır.
 
 ## 1.0.6'daki değişiklikler
 
